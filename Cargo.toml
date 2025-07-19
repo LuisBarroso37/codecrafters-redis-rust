@@ -5,7 +5,8 @@ authors = ["Codecrafters <hello@codecrafters.io>"]
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.98"                                   # error handling
-bytes = "1.10.1"                                    # helps manage buffers
-thiserror = "2.0.12"                                # error handling
-tokio = { version = "1.46.1", features = ["full"] } # async networking
+anyhow = "1.0.98"
+bytes = "1.10.1"
+thiserror = "2.0.12"
+tokio = { version = "1.46.1", features = ["full"] }
+regex = "1.11.1"
