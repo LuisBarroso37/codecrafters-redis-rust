@@ -1,17 +1,18 @@
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    net::TcpListener,
-    sync::{Arc, Mutex},
-    thread,
+    net::TcpListener, sync::Arc,
 };
+
+use tokio::sync::Mutex;
 
 use crate::{key_value_store::KeyValueStore, resp::parse_command};
 
 mod key_value_store;
 mod resp;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
@@ -21,7 +22,7 @@ fn main() {
             Ok(mut stream) => {
                 let store = Arc::clone(&store);
 
-                thread::spawn(move || {
+                tokio::spawn(async move {
                     loop {
                         let mut buf = [0; 1024];
                         let number_of_bytes = stream.read(&mut buf).unwrap();
@@ -29,7 +30,7 @@ fn main() {
                             break; // Connection closed
                         }
 
-                        let mut store = store.lock().unwrap();
+                        let mut store = store.lock().await;
                         let response = parse_command(&buf, &mut store).unwrap();
                         stream.write_all(response.as_bytes()).unwrap();
                     }

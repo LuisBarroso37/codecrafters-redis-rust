@@ -1,4 +1,8 @@
-use std::{sync::MutexGuard, time::Instant};
+
+
+use std::time::Duration;
+
+use tokio::{sync::MutexGuard, time::Instant};
 
 use crate::key_value_store::{KeyValueStore, Value};
 
@@ -97,6 +101,7 @@ pub fn process_command(bulk_array: BulkArray, store: &mut MutexGuard<KeyValueSto
             if let Some(data) = store.get(bulk_array.arguments[1].content.as_str()) {
                 if let Some(expiration) = data.expiration {
                     if Instant::now() > expiration {
+                        store.remove(bulk_array.arguments[1].content.as_str());
                         return "$-1\r\n".to_string();
                     }
                 }
@@ -123,8 +128,8 @@ pub fn process_command(bulk_array: BulkArray, store: &mut MutexGuard<KeyValueSto
 
                 if let Ok(expiration_time) = bulk_array.arguments[4].content.parse::<u64>() {
                     expiration = Some(
-                        std::time::Instant::now()
-                            + std::time::Duration::from_millis(expiration_time),
+                        Instant::now()
+                            + Duration::from_millis(expiration_time),
                     )
                 } else {
                     return "-ERR invalid expiration time\r\n".to_string();
@@ -162,16 +167,13 @@ pub fn parse_command(
 
     match command {
         Ok(cmd) => {
-            println!("Received command: {}", cmd);
             let arguments = cmd.split("\r\n").filter(|s| !s.contains("\0")).collect::<Vec<_>>();
-            print!("Command arguments: {:?}", arguments);
 
             if cmd.starts_with("*") {
                 let bulk_array = BulkArray::from(arguments[0], arguments[1..].to_vec());
 
                 match bulk_array {
                     Ok(array) => {
-                        println!("Parsed bulk array: {:?}", array);
                         Ok(process_command(array, store))
                     }
                     Err(e) => Ok(format!("-ERR {}\r\n", e)),
