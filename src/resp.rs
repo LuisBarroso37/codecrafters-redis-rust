@@ -1,5 +1,3 @@
-
-
 use std::time::Duration;
 
 use tokio::{sync::MutexGuard, time::Instant};
@@ -127,10 +125,7 @@ pub fn process_command(bulk_array: BulkArray, store: &mut MutexGuard<KeyValueSto
                 }
 
                 if let Ok(expiration_time) = bulk_array.arguments[4].content.parse::<u64>() {
-                    expiration = Some(
-                        Instant::now()
-                            + Duration::from_millis(expiration_time),
-                    )
+                    expiration = Some(Instant::now() + Duration::from_millis(expiration_time))
                 } else {
                     return "-ERR invalid expiration time\r\n".to_string();
                 }
@@ -167,15 +162,16 @@ pub fn parse_command(
 
     match command {
         Ok(cmd) => {
-            let arguments = cmd.split("\r\n").filter(|s| !s.contains("\0")).collect::<Vec<_>>();
+            let arguments = cmd
+                .split("\r\n")
+                .filter(|s| !s.contains("\0"))
+                .collect::<Vec<_>>();
 
             if cmd.starts_with("*") {
                 let bulk_array = BulkArray::from(arguments[0], arguments[1..].to_vec());
 
                 match bulk_array {
-                    Ok(array) => {
-                        Ok(process_command(array, store))
-                    }
+                    Ok(array) => Ok(process_command(array, store)),
                     Err(e) => Ok(format!("-ERR {}\r\n", e)),
                 }
             } else if cmd.starts_with("$") {

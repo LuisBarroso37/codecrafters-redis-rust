@@ -1,10 +1,13 @@
-use std::{collections::HashMap, sync::MutexGuard};
+use std::time::Duration;
 
 use regex::Regex;
+use tokio::{sync::MutexGuard, time::Instant};
 
-fn parse_command(
+use crate::key_value_store::{KeyValueStore, Value};
+
+pub fn parse_command(
     buffer: &[u8],
-    data: &mut MutexGuard<HashMap<String, String>>,
+    store: &mut MutexGuard<KeyValueStore>,
 ) -> Result<String, String> {
     let is_ascii = buffer.is_ascii();
 
@@ -17,107 +20,147 @@ fn parse_command(
 
     match command {
         Ok(cmd) => {
-            let re = Regex::new(
-                r"(?x)
-                # RESP Array: *<number-of-elements>\r\n<element-1>...<element-n>
-                \*(?P<array_count>\d+)\r\n
-                (?:
-                    # Bulk String: $<length>\r\n<data>\r\n (command)
-                    \$(?P<cmd_len>\d+)\r\n
-                    (?P<command>[^\r\n]*)\r\n
-                )?
-                (?:
-                    # Bulk String: $<length>\r\n<data>\r\n (arg1)
-                    \$(?P<arg1_len>\d+)\r\n
-                    (?P<arg1>[^\r\n]*)\r\n
-                )?
-                (?:
-                    # Bulk String: $<length>\r\n<data>\r\n (arg2)
-                    \$(?P<arg2_len>\d+)\r\n
-                    (?P<arg2>[^\r\n]*)\r\n
-                )?
-                (?:
-                    # Bulk String: $<length>\r\n<data>\r\n (arg3)
-                    \$(?P<arg3_len>\d+)\r\n
-                    (?P<arg3>[^\r\n]*)\r\n
-                )?
-                (?:
-                    # Additional arguments (flexible)
-                    (?:\$\d+\r\n[^\r\n]*\r\n)*
-                )?
-                |
-                # Alternative RESP types for responses
-                (?P<simple_string>\+[^\r\n]*\r\n)|      # Simple string: +OK\r\n
-                (?P<simple_error>-[^\r\n]*\r\n)|        # Simple error: -ERR message\r\n  
-                (?P<integer>:[+-]?\d+\r\n)|             # Integer: :123\r\n or :-456\r\n
-                (?P<bulk_string>\$(?P<bulk_len>\d+)\r\n(?P<bulk_data>[^\r\n]*)\r\n) # Single bulk string
-                ",
-            )
-            .unwrap();
-
-            if let Some(caps) = re.captures(cmd) {
-                // Handle RESP Array (typical command format)
-                if let Some(_) = caps.name("array_count") {
-                    if let Some(command_match) = caps.name("command") {
-                        let command_str = command_match.as_str().to_uppercase();
-
-                        // Validate command length matches declared length
-                        if let Some(cmd_len) = caps.name("cmd_len") {
-                            let declared_len: usize = cmd_len.as_str().parse().unwrap_or(0);
-                            if command_str.len() != declared_len {
-                                return Ok("-ERR command length mismatch\r\n".to_string());
+            // Use a simpler approach: parse the array header, then extract all bulk strings dynamically
+            let array_header_re = Regex::new(r"^\*(\d+)\r\n").unwrap();
+            
+            if let Some(array_caps) = array_header_re.captures(cmd) {
+                let array_count: usize = array_caps[1].parse().unwrap_or(0);
+                
+                // Extract all bulk strings after the array header
+                let mut remaining = &cmd[array_caps[0].len()..];
+                let mut elements = Vec::new();
+                
+                // Parse each bulk string dynamically
+                for i in 0..array_count {
+                    // Match bulk string pattern: $<length>\r\n<data>\r\n
+                    let bulk_re = Regex::new(r"^\$(\d+)\r\n").unwrap();
+                    
+                    if let Some(bulk_caps) = bulk_re.captures(remaining) {
+                        let declared_length: usize = bulk_caps[1].parse().unwrap_or(0);
+                        let header_len = bulk_caps[0].len();
+                        
+                        // Extract the data part
+                        if remaining.len() >= header_len + declared_length + 2 {
+                            let data = &remaining[header_len..header_len + declared_length];
+                            let expected_suffix = &remaining[header_len + declared_length..header_len + declared_length + 2];
+                            
+                            // Validate CRLF after data
+                            if expected_suffix != "\r\n" {
+                                return Ok(format!(
+                                    "-ERR bulk string {} missing CRLF terminator\r\n", i
+                                ));
                             }
+                            
+                            // Validate declared length matches actual length
+                            if data.len() != declared_length {
+                                return Ok(format!(
+                                    "-ERR bulk string {} length mismatch: declared {}, actual {}\r\n",
+                                    i, declared_length, data.len()
+                                ));
+                            }
+                            
+                            elements.push(data);
+                            
+                            // Move to next bulk string
+                            remaining = &remaining[header_len + declared_length + 2..];
+                        } else {
+                            return Ok(format!(
+                                "-ERR bulk string {} incomplete data\r\n", i
+                            ));
                         }
+                    } else {
+                        return Ok(format!(
+                            "-ERR bulk string {} missing header\r\n", i
+                        ));
+                    }
+                }
+                
+                // Validate array count matches actual elements found
+                if elements.len() != array_count {
+                    return Ok(format!(
+                        "-ERR array count mismatch: declared {}, found {}\r\n", 
+                        array_count, elements.len()
+                    ));
+                }
+                
+                if elements.is_empty() {
+                    return Ok("-ERR empty command\r\n".to_string());
+                }
+                
+                let command_str = elements[0].to_uppercase();
+                let args: Vec<&str> = elements[1..].iter().copied().collect();
 
-                        // Extract and validate arguments
-                        let mut args = Vec::new();
+                println!("Parsed command: {} with {} args: {:?}", command_str, args.len(), args);
 
-                        for i in 1..=3 {
-                            if let Some(arg) = caps.name(&format!("arg{}", i)) {
-                                let arg_str = arg.as_str();
-                                args.push(arg_str);
-
-                                // Validate argument length if available
-                                if let Some(arg_len) = caps.name(&format!("arg{}_len", i)) {
-                                    let declared_len: usize = arg_len.as_str().parse().unwrap_or(0);
-                                    if arg_str.len() != declared_len {
-                                        return Ok(format!(
-                                            "-ERR argument in index {} has length mismatch\r\n",
-                                            i
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-
-                        // Handle specific commands according to RESP spec
-                        match command_str.as_str() {
-                            "PING" => return Ok("+PONG\r\n".to_string()),
-                            "ECHO" if !args.is_empty() => {
-                                let response = format!("${}\r\n{}\r\n", args[0].len(), args[0]);
-                                return Ok(response);
-                            }
-                            "GET" if !args.is_empty() => {
-                                if let Some(value) = data.get(args[0]) {
-                                    let response = format!("${}\r\n{}\r\n", value.len(), value);
-                                    return Ok(response);
-                                } else {
+                // Handle specific commands according to RESP spec
+                match command_str.as_str() {
+                    "PING" => return Ok("+PONG\r\n".to_string()),
+                    "ECHO" if !args.is_empty() => {
+                        let response = format!("${}\r\n{}\r\n", args[0].len(), args[0]);
+                        return Ok(response);
+                    }
+                    "GET" if args.len() == 1 => {
+                        if let Some(data) = store.get(args[0]) {
+                            if let Some(expiration) = data.expiration {
+                                if Instant::now() > expiration {
+                                    store.remove(args[0]);
                                     return Ok("$-1\r\n".to_string());
                                 }
                             }
-                            "SET" if args.len() == 2 => {
-                                data.insert(args[0].to_string(), args[1].to_string());
-                                return Ok("+OK\r\n".to_string());
-                            }
-                            _ => return Ok("-ERR unknown command\r\n".to_string()),
+
+                            let response =
+                                format!("${}\r\n{}\r\n", data.value.len(), data.value);
+                            return Ok(response);
+                        } else {
+                            return Ok("$-1\r\n".to_string());
                         }
                     }
+                    "SET" => {
+                        println!("SET command received {:?}", args);
+                        if args.len() == 2 {
+                            store.insert(
+                                args[0].to_string(),
+                                Value {
+                                    value: args[1].to_string(),
+                                    expiration: None,
+                                },
+                            );
+                            return Ok("+OK\r\n".to_string());
+                        } else if args.len() == 4 {
+                            if args[2].to_uppercase() != "PX" {
+                                return Ok(
+                                    "-ERR invalid SET command argument\r\n".to_string()
+                                );
+                            }
+
+                            match args[3].parse() {
+                                Ok(duration) => {
+                                    let expiration =
+                                        Instant::now() + Duration::from_millis(duration);
+                                    store.insert(
+                                        args[0].to_string(),
+                                        Value {
+                                            value: args[1].to_string(),
+                                            expiration: Some(expiration),
+                                        },
+                                    );
+                                    return Ok("+OK\r\n".to_string());
+                                }
+                                Err(_) => {
+                                    return Ok(
+                                        "-ERR invalid SET command argument\r\n".to_string()
+                                    );
+                                }
+                            }
+                        } else {
+                            return Ok("-ERR invalid SET command\r\n".to_string());
+                        }
+                    }
+                    _ => return Ok("-ERR unknown command\r\n".to_string()),
                 }
             } else {
                 return Ok("-ERR protocol error\r\n".to_string());
             }
-
-            Ok("-ERR unknown command\r\n".to_string())
         }
         Err(_) => Ok("-ERR invalid UTF-8 sequence\r\n".to_string()),
     }

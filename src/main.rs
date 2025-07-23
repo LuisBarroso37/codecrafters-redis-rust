@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    net::TcpListener, sync::Arc,
+    net::TcpListener,
+    sync::Arc,
 };
 
 use tokio::sync::Mutex;
