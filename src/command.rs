@@ -169,15 +169,24 @@ pub fn handle_command(
                 .entry(command.args[0].clone())
                 .and_modify(|v| {
                     if let DataType::Array(ref mut list) = v.data {
-                        list.push(command.args[1].clone());
+                        for i in 1..command.args.len() {
+                            list.push(command.args[i].clone());
+                        }
+
                         array_length = list.len();
                     }
                 })
                 .or_insert_with(|| {
-                    array_length = 1;
+                    let mut list = Vec::new();
+
+                    for i in 1..command.args.len() {
+                        list.push(command.args[i].clone());
+                    }
+
+                    array_length = list.len();
 
                     return Value {
-                        data: DataType::Array(vec![command.args[1].clone()]),
+                        data: DataType::Array(list),
                         expiration: None,
                     };
                 });
