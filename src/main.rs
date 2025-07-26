@@ -7,8 +7,12 @@ use std::{
 
 use tokio::sync::Mutex;
 
-use crate::{key_value_store::KeyValueStore, resp::parse_command};
+use crate::{
+    command::handle_command, input::parse_input, key_value_store::KeyValueStore, resp::RespValue,
+};
 
+mod command;
+mod input;
 mod key_value_store;
 mod resp;
 
@@ -32,8 +36,27 @@ async fn main() {
                         }
 
                         let mut store = store.lock().await;
-                        let response = parse_command(&buf, &mut store).unwrap();
-                        stream.write_all(response.as_bytes()).unwrap();
+
+                        let input = match parse_input(&buf) {
+                            Ok(input) => input,
+                            Err(e) => {
+                                stream.write_all(e.as_bytes()).unwrap();
+                                continue;
+                            }
+                        };
+
+                        let parsed_command = match RespValue::parse(input) {
+                            Ok(cmd) => cmd,
+                            Err(e) => {
+                                stream.write_all(e.as_bytes()).unwrap();
+                                continue;
+                            }
+                        };
+
+                        match handle_command(parsed_command, &mut store) {
+                            Ok(resp) => stream.write_all(resp.as_bytes()).unwrap(),
+                            Err(e) => stream.write_all(e.as_bytes()).unwrap(),
+                        }
                     }
                 });
             }

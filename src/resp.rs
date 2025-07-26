@@ -1,191 +1,105 @@
-use std::time::Duration;
+use std::slice::Iter;
 
-use tokio::{sync::MutexGuard, time::Instant};
+use thiserror::Error;
 
-use crate::key_value_store::{KeyValueStore, Value};
-
-#[derive(Debug)]
-pub struct BulkString {
-    length: usize,
-    content: String,
+#[derive(Error, Debug)]
+pub enum RespError {
+    #[error("invalid UTF-8 sequence")]
+    InvalidUtf8,
+    #[error("unknown RESP type")]
+    UnknownRespType,
+    #[error("failed to parse integer")]
+    FailedToParseInteger,
+    #[error("invalid bulk string")]
+    InvalidBulkString,
+    #[error("invalid array")]
+    InvalidArray,
 }
 
-impl BulkString {
-    pub fn from(data_information: &str, data: &str) -> Result<Self, anyhow::Error> {
-        let data_length = data_information.strip_prefix('$');
-        let declared_length: usize;
-
-        if let Some(length) = data_length {
-            declared_length = length.parse::<usize>().unwrap_or(0);
-        } else {
-            return Err(anyhow::anyhow!("Invalid bulk string format"));
+impl RespError {
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            RespError::InvalidUtf8 => b"-ERR invalid UTF-8 sequence\r\n",
+            RespError::UnknownRespType => b"-ERR unknown RESP type\r\n",
+            RespError::FailedToParseInteger => b"-ERR failed to parse integer\r\n",
+            RespError::InvalidBulkString => b"-ERR invalid bulk string\r\n",
+            RespError::InvalidArray => b"-ERR invalid array\r\n",
         }
-
-        if data.len() != declared_length {
-            return Err(anyhow::anyhow!("String length mismatch"));
-        }
-
-        Ok(BulkString {
-            length: declared_length,
-            content: data.to_string(),
-        })
     }
 }
 
 #[derive(Debug)]
-pub struct BulkArray {
-    length: usize,
-    arguments: Vec<BulkString>,
+pub enum RespValue {
+    SimpleString(String),
+    Error(String),
+    Integer(i64),
+    BulkString(String),
+    Array(Vec<RespValue>),
 }
 
-impl BulkArray {
-    pub fn from(data_information: &str, arguments: Vec<&str>) -> Result<Self, anyhow::Error> {
-        let data_length = data_information.strip_prefix('*');
-        let number_of_arguments: usize;
+impl RespValue {
+    pub fn parse(data: Vec<&str>) -> Result<Vec<RespValue>, RespError> {
+        let mut data_iter = data.iter();
 
-        if let Some(length) = data_length {
-            // Parse the length of the bulk string
-            number_of_arguments = length.parse::<usize>().unwrap_or(0);
+        let mut vec = Vec::new();
+
+        while let Some(value) = data_iter.next() {
+            let decoded = Self::decode(value, &mut data_iter)?;
+            vec.push(decoded);
+        }
+
+        Ok(vec)
+    }
+
+    pub fn decode(value: &str, rest_of_data: &mut Iter<'_, &str>) -> Result<Self, RespError> {
+        if value.starts_with("$") {
+            let bulk_string_info = value.trim_start_matches("$");
+
+            if let Some(next_line) = rest_of_data.next() {
+                let bulk_string_length = bulk_string_info
+                    .parse::<usize>()
+                    .map_err(|_| RespError::InvalidBulkString)?;
+
+                if next_line.len() == bulk_string_length {
+                    Ok(RespValue::BulkString(next_line.to_string()))
+                } else {
+                    return Err(RespError::InvalidBulkString);
+                }
+            } else {
+                return Err(RespError::InvalidBulkString);
+            }
+        } else if value.starts_with("+") {
+            let content = value.trim_start_matches("+").to_string();
+            Ok(RespValue::SimpleString(content))
+        } else if value.starts_with(":") {
+            let content = value.trim_start_matches(":");
+
+            if let Ok(value) = content.parse::<i64>() {
+                Ok(RespValue::Integer(value))
+            } else {
+                Err(RespError::FailedToParseInteger)
+            }
+        } else if value.starts_with("*") {
+            let array_info = value.trim_start_matches("*");
+
+            let array_length = array_info
+                .parse::<usize>()
+                .map_err(|_| RespError::FailedToParseInteger)?;
+
+            let mut array_elements: Vec<RespValue> = Vec::with_capacity(array_length);
+
+            while array_elements.len() < array_length {
+                if let Some(mut next_element) = rest_of_data.next() {
+                    let decoded_element = Self::decode(&mut next_element, rest_of_data)?;
+                    array_elements.push(decoded_element);
+                } else {
+                    return Err(RespError::InvalidArray);
+                }
+            }
+
+            Ok(RespValue::Array(array_elements))
         } else {
-            return Err(anyhow::anyhow!("Invalid bulk array format"));
+            return Err(RespError::UnknownRespType);
         }
-
-        if arguments.len() / 2 != number_of_arguments {
-            return Err(anyhow::anyhow!("Argument count mismatch"));
-        }
-
-        let validated_arguments: Result<Vec<_>, _> = arguments
-            .chunks(2)
-            .map(|chunk| {
-                if chunk.len() == 2 {
-                    BulkString::from(&chunk[0], &chunk[1])
-                } else {
-                    Err(anyhow::anyhow!("Invalid argument chunk"))
-                }
-            })
-            .collect();
-
-        Ok(BulkArray {
-            length: number_of_arguments,
-            arguments: validated_arguments?,
-        })
-    }
-}
-
-pub fn process_command(bulk_array: BulkArray, store: &mut MutexGuard<KeyValueStore>) -> String {
-    if bulk_array.length == 0 {
-        return "-ERR unknown command\r\n".to_string();
-    }
-
-    let command = bulk_array.arguments[0].content.to_uppercase();
-
-    match command.as_str() {
-        "PING" => "+PONG\r\n".to_string(),
-        "ECHO" => {
-            if bulk_array.length < 2 {
-                return "-ERR wrong number of arguments for 'ECHO' command\r\n".to_string();
-            }
-
-            format!(
-                "${}\r\n{}\r\n",
-                bulk_array.arguments[1].length, bulk_array.arguments[1].content
-            )
-        }
-        "GET" => {
-            if bulk_array.length < 2 {
-                return "-ERR wrong number of arguments for 'GET' command\r\n".to_string();
-            }
-
-            if let Some(data) = store.get(bulk_array.arguments[1].content.as_str()) {
-                if let Some(expiration) = data.expiration {
-                    if Instant::now() > expiration {
-                        store.remove(bulk_array.arguments[1].content.as_str());
-                        return "$-1\r\n".to_string();
-                    }
-                }
-
-                return format!("${}\r\n{}\r\n", data.value.len(), data.value);
-            } else {
-                return "$-1\r\n".to_string();
-            }
-        }
-        "SET" => {
-            if bulk_array.length != 3 && bulk_array.length != 5 {
-                return "-ERR wrong number of arguments for 'SET' command\r\n".to_string();
-            }
-
-            let mut expiration: Option<Instant> = None;
-
-            if bulk_array.length == 5 {
-                if bulk_array.arguments[3].content.to_uppercase() != "PX" {
-                    return format!(
-                        "-ERR unknown SET command argument {} \r\n",
-                        bulk_array.arguments[3].content
-                    );
-                }
-
-                if let Ok(expiration_time) = bulk_array.arguments[4].content.parse::<u64>() {
-                    expiration = Some(Instant::now() + Duration::from_millis(expiration_time))
-                } else {
-                    return "-ERR invalid expiration time\r\n".to_string();
-                }
-            }
-
-            store.insert(
-                bulk_array.arguments[1].content.clone(),
-                Value {
-                    value: bulk_array.arguments[2].content.clone(),
-                    expiration,
-                },
-            );
-
-            return "+OK\r\n".to_string();
-        }
-        _ => {
-            return "-ERR unknown command\r\n".to_string();
-        }
-    }
-}
-
-pub fn parse_command(
-    buffer: &[u8],
-    store: &mut MutexGuard<KeyValueStore>,
-) -> Result<String, String> {
-    let is_ascii = buffer.is_ascii();
-
-    if !is_ascii {
-        return Err("Input is not ASCII".to_string());
-    }
-
-    let ascii = buffer.to_ascii_lowercase();
-    let command = str::from_utf8(ascii.as_slice());
-
-    match command {
-        Ok(cmd) => {
-            let arguments = cmd
-                .split("\r\n")
-                .filter(|s| !s.contains("\0"))
-                .collect::<Vec<_>>();
-
-            if cmd.starts_with("*") {
-                let bulk_array = BulkArray::from(arguments[0], arguments[1..].to_vec());
-
-                match bulk_array {
-                    Ok(array) => Ok(process_command(array, store)),
-                    Err(e) => Ok(format!("-ERR {}\r\n", e)),
-                }
-            } else if cmd.starts_with("$") {
-                Ok("-ERR unknown command\r\n".to_string())
-            } else if cmd.starts_with("+") {
-                Ok("-ERR unknown command\r\n".to_string())
-            } else if cmd.starts_with("-") {
-                Ok("-ERR unknown command\r\n".to_string())
-            } else if cmd.starts_with(":") {
-                Ok("-ERR unknown command\r\n".to_string())
-            } else {
-                Ok("-ERR unknown command\r\n".to_string())
-            }
-        }
-        Err(_) => Ok("-ERR invalid UTF-8 sequence\r\n".to_string()),
     }
 }
