@@ -1,14 +1,16 @@
+use std::collections::VecDeque;
+
 use codecrafters_redis::command::validate_range_indexes;
 
 #[test]
 fn test_validate_indexes() {
-    let list = vec![
+    let list = VecDeque::from([
         "grape".into(),
         "apple".into(),
         "pineapple".into(),
         "mango".into(),
         "raspberry".into(),
-    ];
+    ]);
 
     let test_cases = vec![
         (0, 2, Ok((0, 2))),

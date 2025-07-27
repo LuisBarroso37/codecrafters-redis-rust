@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 use thiserror::Error;
 use tokio::time::Instant;
 
@@ -35,6 +35,8 @@ pub enum CommandError {
     InvalidLPushCommand,
     #[error("invalid LLEN command")]
     InvalidLLenCommand,
+    #[error("invalid LPOP command")]
+    InvalidLPopCommand,
 }
 
 impl CommandError {
@@ -55,6 +57,7 @@ impl CommandError {
             }
             CommandError::InvalidLPushCommand => b"-ERR invalid LPUSH command\r\n",
             CommandError::InvalidLLenCommand => b"-ERR invalid LLEN command\r\n",
+            CommandError::InvalidLPopCommand => b"-ERR invalid LPOP command\r\n",
         }
     }
 }
@@ -200,9 +203,10 @@ pub fn handle_command(
                             return Ok("*0\r\n".to_string());
                         };
 
-                        let range = list.get(start..=end);
+                        let range = list.range(start..=end).collect::<Vec<&String>>();
 
-                        if let Some(range) = range {
+                        if !range.is_empty() {
+                            let len = range.len();
                             let mut vec = Vec::new();
 
                             for item in range {
@@ -210,7 +214,7 @@ pub fn handle_command(
                                 vec.push(item.clone());
                             }
 
-                            return Ok(format!("*{}\r\n{}\r\n", range.len(), vec.join("\r\n")));
+                            return Ok(format!("*{}\r\n{}\r\n", len, vec.join("\r\n")));
                         } else {
                             return Ok("*0\r\n".to_string());
                         }
@@ -244,6 +248,30 @@ pub fn handle_command(
                 }
             }
         }
+        "LPOP" => {
+            if command.args.len() != 1 {
+                return Err(CommandError::InvalidLPopCommand);
+            }
+
+            let stored_data = store.get_mut(&command.args[0]);
+
+            match stored_data {
+                Some(value) => {
+                    if let DataType::Array(ref mut list) = value.data {
+                        if let Some(removed) = list.pop_front() {
+                            return Ok(format!("${}\r\n{}\r\n", removed.len(), removed));
+                        } else {
+                            return Ok("$-1\r\n".into());
+                        }
+                    } else {
+                        return Ok("$-1\r\n".into());
+                    }
+                }
+                None => {
+                    return Ok("$-1\r\n".into());
+                }
+            }
+        }
         _ => {
             return Err(CommandError::InvalidEchoCommand);
         }
@@ -251,7 +279,7 @@ pub fn handle_command(
 }
 
 pub fn validate_range_indexes(
-    list: &[String],
+    list: &VecDeque<String>,
     start_index: isize,
     end_index: isize,
 ) -> Result<(usize, usize), &str> {
@@ -303,9 +331,9 @@ pub fn push_array_operations(
             if let DataType::Array(ref mut list) = v.data {
                 for i in 1..command.args.len() {
                     if should_prepend {
-                        list.insert(0, command.args[i].clone());
+                        list.push_front(command.args[i].clone());
                     } else {
-                        list.push(command.args[i].clone());
+                        list.push_back(command.args[i].clone());
                     }
                 }
 
@@ -313,13 +341,13 @@ pub fn push_array_operations(
             }
         })
         .or_insert_with(|| {
-            let mut list = Vec::new();
+            let mut list = VecDeque::new();
 
             for i in 1..command.args.len() {
                 if should_prepend {
-                    list.insert(0, command.args[i].clone());
+                    list.push_front(command.args[i].clone());
                 } else {
-                    list.push(command.args[i].clone());
+                    list.push_back(command.args[i].clone());
                 }
             }
 

@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use tokio::time::Instant;
 
 #[derive(Debug, PartialEq)]
 pub enum DataType {
     String(String),
-    Array(Vec<String>),
+    Array(VecDeque<String>),
 }
 
 #[derive(Debug, PartialEq)]

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -275,7 +275,11 @@ fn test_handle_rpush_command_insert() {
     assert_eq!(
         value,
         Some(&Value {
-            data: DataType::Array(vec!["mango".into(), "raspberry".into(), "apple".into(),]),
+            data: DataType::Array(VecDeque::from([
+                "mango".into(),
+                "raspberry".into(),
+                "apple".into()
+            ])),
             expiration: None,
         })
     );
@@ -299,7 +303,11 @@ fn test_handle_rpush_command_update() {
     assert_eq!(
         inserted_value,
         Some(&Value {
-            data: DataType::Array(vec!["mango".into(), "raspberry".into(), "apple".into(),]),
+            data: DataType::Array(VecDeque::from([
+                "mango".into(),
+                "raspberry".into(),
+                "apple".into()
+            ])),
             expiration: None,
         })
     );
@@ -315,12 +323,12 @@ fn test_handle_rpush_command_update() {
     assert_eq!(
         updated_value,
         Some(&Value {
-            data: DataType::Array(vec![
+            data: DataType::Array(VecDeque::from([
                 "mango".into(),
                 "raspberry".into(),
                 "apple".into(),
                 "pear".into(),
-            ]),
+            ])),
             expiration: None,
         })
     );
@@ -421,7 +429,11 @@ fn test_handle_lpush_command_insert() {
     assert_eq!(
         value,
         Some(&Value {
-            data: DataType::Array(vec!["apple".into(), "raspberry".into(), "mango".into(),]),
+            data: DataType::Array(VecDeque::from([
+                "apple".into(),
+                "raspberry".into(),
+                "mango".into()
+            ])),
             expiration: None,
         })
     );
@@ -445,7 +457,11 @@ fn test_handle_lpush_command_update() {
     assert_eq!(
         inserted_value,
         Some(&Value {
-            data: DataType::Array(vec!["apple".into(), "raspberry".into(), "mango".into(),]),
+            data: DataType::Array(VecDeque::from([
+                "apple".into(),
+                "raspberry".into(),
+                "mango".into()
+            ])),
             expiration: None,
         })
     );
@@ -461,12 +477,12 @@ fn test_handle_lpush_command_update() {
     assert_eq!(
         updated_value,
         Some(&Value {
-            data: DataType::Array(vec![
+            data: DataType::Array(VecDeque::from([
                 "pear".into(),
                 "apple".into(),
                 "raspberry".into(),
                 "mango".into(),
-            ]),
+            ])),
             expiration: None,
         })
     );
@@ -550,4 +566,72 @@ fn test_handle_llen_command_invalid() {
         handle_command(list, &mut st),
         Err(CommandError::InvalidLLenCommand)
     );
+}
+
+#[test]
+fn test_handle_lpop_command() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let rpush_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("RPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+        RespValue::BulkString("raspberry".into()),
+        RespValue::BulkString("apple".into()),
+    ])];
+    assert_eq!(handle_command(rpush_list, &mut st), Ok(":3\r\n".into()));
+
+    let lpop_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPOP".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+    assert_eq!(
+        handle_command(lpop_list, &mut st),
+        Ok("$5\r\nmango\r\n".into())
+    );
+}
+
+#[test]
+fn test_handle_lpop_command_invalid() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let list = vec![RespValue::Array(vec![RespValue::BulkString("LPOP".into())])];
+    assert_eq!(
+        handle_command(list, &mut st),
+        Err(CommandError::InvalidLPopCommand)
+    );
+}
+
+#[test]
+fn test_handle_lpop_command_not_found() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPOP".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+    assert_eq!(handle_command(list, &mut st), Ok("$-1\r\n".into()));
+}
+
+#[test]
+fn test_handle_lpop_command_wrong_data_type() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let set_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("SET".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+    ])];
+
+    assert_eq!(handle_command(set_list, &mut st), Ok("+OK\r\n".into()));
+
+    let list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPOP".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+    assert_eq!(handle_command(list, &mut st), Ok("$-1\r\n".into()));
 }
