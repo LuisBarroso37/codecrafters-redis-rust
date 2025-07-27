@@ -483,6 +483,71 @@ fn test_handle_lpush_command_invalid() {
     let mut st = store.lock().unwrap();
     assert_eq!(
         handle_command(list, &mut st),
-        Err(CommandError::InvalidRPushCommand)
+        Err(CommandError::InvalidLPushCommand)
+    );
+}
+
+#[test]
+fn test_handle_llen_command() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let rpush_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("RPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+        RespValue::BulkString("raspberry".into()),
+        RespValue::BulkString("apple".into()),
+    ])];
+    assert_eq!(handle_command(rpush_list, &mut st), Ok(":3\r\n".into()));
+
+    let llen_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LLEN".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+    assert_eq!(handle_command(llen_list, &mut st), Ok(":3\r\n".into()));
+}
+
+#[test]
+fn test_handle_llen_command_not_found() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LLEN".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+    assert_eq!(handle_command(list, &mut st), Ok(":0\r\n".into()));
+}
+
+#[test]
+fn test_handle_llen_command_wrong_data_type() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let set_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("SET".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+    ])];
+
+    assert_eq!(handle_command(set_list, &mut st), Ok("+OK\r\n".into()));
+
+    let list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LLEN".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+    assert_eq!(handle_command(list, &mut st), Ok(":0\r\n".into()));
+}
+
+#[test]
+fn test_handle_llen_command_invalid() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let list = vec![RespValue::Array(vec![RespValue::BulkString("LLEN".into())])];
+    assert_eq!(
+        handle_command(list, &mut st),
+        Err(CommandError::InvalidLLenCommand)
     );
 }

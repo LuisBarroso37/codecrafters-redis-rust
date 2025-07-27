@@ -4,8 +4,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum RespError {
-    #[error("invalid UTF-8 sequence")]
-    InvalidUtf8,
     #[error("unknown RESP type")]
     UnknownRespType,
     #[error("failed to parse integer")]
@@ -19,7 +17,6 @@ pub enum RespError {
 impl RespError {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            RespError::InvalidUtf8 => b"-ERR invalid UTF-8 sequence\r\n",
             RespError::UnknownRespType => b"-ERR unknown RESP type\r\n",
             RespError::FailedToParseInteger => b"-ERR failed to parse integer\r\n",
             RespError::InvalidBulkString => b"-ERR invalid bulk string\r\n",

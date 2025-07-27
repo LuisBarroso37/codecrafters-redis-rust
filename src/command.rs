@@ -3,7 +3,6 @@ use thiserror::Error;
 use tokio::time::Instant;
 
 use crate::{
-    command,
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
 };
@@ -32,6 +31,10 @@ pub enum CommandError {
     InvalidLRangeCommand,
     #[error("invalid LRANGE command argument")]
     InvalidLRangeCommandArgument,
+    #[error("invalid LPUSH command")]
+    InvalidLPushCommand,
+    #[error("invalid LLEN command")]
+    InvalidLLenCommand,
 }
 
 impl CommandError {
@@ -50,6 +53,8 @@ impl CommandError {
             CommandError::InvalidLRangeCommandArgument => {
                 b"-ERR invalid LRANGE command argument\r\n"
             }
+            CommandError::InvalidLPushCommand => b"-ERR invalid LPUSH command\r\n",
+            CommandError::InvalidLLenCommand => b"-ERR invalid LLEN command\r\n",
         }
     }
 }
@@ -219,6 +224,26 @@ pub fn handle_command(
             }
         }
         "LPUSH" => push_array_operations(&command, store, true),
+        "LLEN" => {
+            if command.args.len() != 1 {
+                return Err(CommandError::InvalidLLenCommand);
+            }
+
+            let stored_data = store.get(&command.args[0]);
+
+            match stored_data {
+                Some(value) => {
+                    if let DataType::Array(ref list) = value.data {
+                        return Ok(format!(":{}\r\n", list.len()));
+                    } else {
+                        return Ok(":0\r\n".to_string());
+                    }
+                }
+                None => {
+                    return Ok(":0\r\n".to_string());
+                }
+            }
+        }
         _ => {
             return Err(CommandError::InvalidEchoCommand);
         }
@@ -263,7 +288,11 @@ pub fn push_array_operations(
     should_prepend: bool,
 ) -> Result<String, CommandError> {
     if command.args.len() < 2 {
-        return Err(CommandError::InvalidRPushCommand);
+        return if should_prepend {
+            Err(CommandError::InvalidLPushCommand)
+        } else {
+            Err(CommandError::InvalidRPushCommand)
+        };
     }
 
     let mut array_length = 0;
