@@ -20,14 +20,18 @@ fn test_validate_indexes() {
             1,
             Err("Start index is bigger than end index after processing"),
         ),
-        (4, 4, Err("Start index is out of bounds")),
+        (4, 4, Ok((4, 4))),
         (5, 6, Err("Start index is out of bounds")),
         (-1, -1, Ok((4, 4))),
         (-2, -1, Ok((3, 4))),
         (-3, -1, Ok((2, 4))),
         (-9, -2, Ok((0, 3))),
         (-5, -3, Ok((0, 2))),
-        (-2, -10, Err("Negative end index is out of bounds")),
+        (
+            -2,
+            -10,
+            Err("Start index is bigger than end index after processing"),
+        ),
     ];
 
     for (start_index, end_index, expected) in test_cases {

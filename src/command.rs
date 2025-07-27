@@ -3,6 +3,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 
 use crate::{
+    command,
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
 };
@@ -165,45 +166,7 @@ pub fn handle_command(
 
             return Ok("+OK\r\n".to_string());
         }
-        "RPUSH" => {
-            if command.args.len() < 2 {
-                return Err(CommandError::InvalidRPushCommand);
-            }
-
-            let mut array_length = 0;
-
-            store
-                .entry(command.args[0].clone())
-                .and_modify(|v| {
-                    if let DataType::Array(ref mut list) = v.data {
-                        for i in 1..command.args.len() {
-                            list.push(command.args[i].clone());
-                        }
-
-                        array_length = list.len();
-                    }
-                })
-                .or_insert_with(|| {
-                    let mut list = Vec::new();
-
-                    for i in 1..command.args.len() {
-                        list.push(command.args[i].clone());
-                    }
-
-                    array_length = list.len();
-
-                    return Value {
-                        data: DataType::Array(list),
-                        expiration: None,
-                    };
-                });
-
-            if array_length == 0 {
-                return Err(CommandError::DataNotFound);
-            }
-
-            return Ok(format!(":{}\r\n", array_length));
-        }
+        "RPUSH" => push_array_operations(&command, store, false),
         "LRANGE" => {
             if command.args.len() != 3 {
                 return Err(CommandError::InvalidLRangeCommand);
@@ -255,6 +218,7 @@ pub fn handle_command(
                 }
             }
         }
+        "LPUSH" => push_array_operations(&command, store, true),
         _ => {
             return Err(CommandError::InvalidEchoCommand);
         }
@@ -266,41 +230,81 @@ pub fn validate_range_indexes(
     start_index: isize,
     end_index: isize,
 ) -> Result<(usize, usize), &str> {
-    let start: usize;
+    let len = list.len() as isize;
 
-    if start_index < 0 {
-        if start_index.abs() as usize > list.len() {
-            start = 0;
-        } else {
-            start = list.len() - start_index.abs() as usize;
-        }
+    let mut start = if start_index < 0 {
+        len + start_index
     } else {
-        if start_index >= (list.len() - 1) as isize {
-            return Err("Start index is out of bounds");
-        } else {
-            start = start_index as usize;
-        }
-    }
-
-    let end: usize;
-
-    if end_index < 0 {
-        if end_index.abs() as usize > list.len() {
-            return Err("Negative end index is out of bounds");
-        } else {
-            end = list.len() - end_index.abs() as usize;
-        }
+        start_index
+    };
+    let mut end = if end_index < 0 {
+        len + end_index
     } else {
-        if end_index > (list.len() - 1) as isize {
-            end = list.len() - 1;
-        } else {
-            end = end_index as usize;
-        }
+        end_index
+    };
+
+    start = start.max(0);
+    end = end.min(len - 1);
+
+    if start >= len {
+        return Err("Start index is out of bounds");
     }
 
     if start > end {
         return Err("Start index is bigger than end index after processing");
     }
 
-    Ok((start, end))
+    Ok((start as usize, end as usize))
+}
+
+pub fn push_array_operations(
+    command: &Command,
+    store: &mut KeyValueStore,
+    should_prepend: bool,
+) -> Result<String, CommandError> {
+    if command.args.len() < 2 {
+        return Err(CommandError::InvalidRPushCommand);
+    }
+
+    let mut array_length = 0;
+
+    store
+        .entry(command.args[0].clone())
+        .and_modify(|v| {
+            if let DataType::Array(ref mut list) = v.data {
+                for i in 1..command.args.len() {
+                    if should_prepend {
+                        list.insert(0, command.args[i].clone());
+                    } else {
+                        list.push(command.args[i].clone());
+                    }
+                }
+
+                array_length = list.len();
+            }
+        })
+        .or_insert_with(|| {
+            let mut list = Vec::new();
+
+            for i in 1..command.args.len() {
+                if should_prepend {
+                    list.insert(0, command.args[i].clone());
+                } else {
+                    list.push(command.args[i].clone());
+                }
+            }
+
+            array_length = list.len();
+
+            return Value {
+                data: DataType::Array(list),
+                expiration: None,
+            };
+        });
+
+    if array_length == 0 {
+        return Err(CommandError::DataNotFound);
+    }
+
+    return Ok(format!(":{}\r\n", array_length));
 }

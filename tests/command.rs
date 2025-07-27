@@ -402,3 +402,87 @@ fn test_handle_lrange_command() {
         assert_eq!(handle_command(command, &mut st), expected);
     }
 }
+
+#[test]
+fn test_handle_lpush_command_insert() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+        RespValue::BulkString("raspberry".into()),
+        RespValue::BulkString("apple".into()),
+    ])];
+
+    let mut st = store.lock().unwrap();
+    assert_eq!(handle_command(list, &mut st), Ok(":3\r\n".into()));
+
+    let value = st.get("grape");
+    assert_eq!(
+        value,
+        Some(&Value {
+            data: DataType::Array(vec!["apple".into(), "raspberry".into(), "mango".into(),]),
+            expiration: None,
+        })
+    );
+}
+
+#[test]
+fn test_handle_lpush_command_update() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let insert_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+        RespValue::BulkString("raspberry".into()),
+        RespValue::BulkString("apple".into()),
+    ])];
+
+    let mut st = store.lock().unwrap();
+    assert_eq!(handle_command(insert_list, &mut st), Ok(":3\r\n".into()));
+
+    let inserted_value = st.get("grape");
+    assert_eq!(
+        inserted_value,
+        Some(&Value {
+            data: DataType::Array(vec!["apple".into(), "raspberry".into(), "mango".into(),]),
+            expiration: None,
+        })
+    );
+
+    let update_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("pear".into()),
+    ])];
+    assert_eq!(handle_command(update_list, &mut st), Ok(":4\r\n".into()));
+
+    let updated_value = st.get("grape");
+    assert_eq!(
+        updated_value,
+        Some(&Value {
+            data: DataType::Array(vec![
+                "pear".into(),
+                "apple".into(),
+                "raspberry".into(),
+                "mango".into(),
+            ]),
+            expiration: None,
+        })
+    );
+}
+
+#[test]
+fn test_handle_lpush_command_invalid() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPUSH".into()),
+        RespValue::BulkString("grape".into()),
+    ])];
+
+    let mut st = store.lock().unwrap();
+    assert_eq!(
+        handle_command(list, &mut st),
+        Err(CommandError::InvalidRPushCommand)
+    );
+}
