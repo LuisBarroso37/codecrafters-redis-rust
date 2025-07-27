@@ -37,6 +37,8 @@ pub enum CommandError {
     InvalidLLenCommand,
     #[error("invalid LPOP command")]
     InvalidLPopCommand,
+    #[error("invalid LPOP command argument")]
+    InvalidLPopCommandArgument,
 }
 
 impl CommandError {
@@ -58,6 +60,7 @@ impl CommandError {
             CommandError::InvalidLPushCommand => b"-ERR invalid LPUSH command\r\n",
             CommandError::InvalidLLenCommand => b"-ERR invalid LLEN command\r\n",
             CommandError::InvalidLPopCommand => b"-ERR invalid LPOP command\r\n",
+            CommandError::InvalidLPopCommandArgument => b"-ERR invalid LPOP command argument\r\n",
         }
     }
 }
@@ -206,15 +209,16 @@ pub fn handle_command(
                         let range = list.range(start..=end).collect::<Vec<&String>>();
 
                         if !range.is_empty() {
-                            let len = range.len();
-                            let mut vec = Vec::new();
+                            let formatted_vec = range
+                                .iter()
+                                .map(|s| format!("${}\r\n{}", s.len(), s))
+                                .collect::<Vec<String>>();
 
-                            for item in range {
-                                vec.push(format!("${}", item.len()));
-                                vec.push(item.clone());
-                            }
-
-                            return Ok(format!("*{}\r\n{}\r\n", len, vec.join("\r\n")));
+                            return Ok(format!(
+                                "*{}\r\n{}\r\n",
+                                formatted_vec.len(),
+                                formatted_vec.join("\r\n")
+                            ));
                         } else {
                             return Ok("*0\r\n".to_string());
                         }
@@ -249,26 +253,51 @@ pub fn handle_command(
             }
         }
         "LPOP" => {
-            if command.args.len() != 1 {
+            if command.args.len() < 1 || command.args.len() > 2 {
                 return Err(CommandError::InvalidLPopCommand);
             }
 
             let stored_data = store.get_mut(&command.args[0]);
 
+            let amount_of_elements_to_delete = if let Some(val) = command.args.get(1) {
+                val.parse::<usize>()
+                    .map_err(|_| CommandError::InvalidLPopCommandArgument)?
+            } else {
+                1
+            };
+
             match stored_data {
                 Some(value) => {
                     if let DataType::Array(ref mut list) = value.data {
-                        if let Some(removed) = list.pop_front() {
-                            return Ok(format!("${}\r\n{}\r\n", removed.len(), removed));
+                        let mut vec = Vec::new();
+
+                        for _ in 0..amount_of_elements_to_delete {
+                            if let Some(removed) = list.pop_front() {
+                                vec.push(removed);
+                            }
+                        }
+
+                        if vec.len() == 0 {
+                            return Ok("$-1\r\n".to_string());
+                        } else if vec.len() == 1 {
+                            return Ok(format!("${}\r\n{}\r\n", vec[0].len(), vec[0]));
                         } else {
-                            return Ok("$-1\r\n".into());
+                            let formatted_vec = vec
+                                .iter()
+                                .map(|s| format!("${}\r\n{}", s.len(), s))
+                                .collect::<Vec<String>>();
+                            return Ok(format!(
+                                "*{}\r\n{}\r\n",
+                                vec.len(),
+                                formatted_vec.join("\r\n")
+                            ));
                         }
                     } else {
-                        return Ok("$-1\r\n".into());
+                        return Ok("$-1\r\n".to_string());
                     }
                 }
                 None => {
-                    return Ok("$-1\r\n".into());
+                    return Ok("$-1\r\n".to_string());
                 }
             }
         }

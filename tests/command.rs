@@ -635,3 +635,28 @@ fn test_handle_lpop_command_wrong_data_type() {
     ])];
     assert_eq!(handle_command(list, &mut st), Ok("$-1\r\n".into()));
 }
+
+#[test]
+fn test_handle_lpop_command_multiple_elements() {
+    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut st = store.lock().unwrap();
+
+    let rpush_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("RPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+        RespValue::BulkString("raspberry".into()),
+        RespValue::BulkString("apple".into()),
+    ])];
+    assert_eq!(handle_command(rpush_list, &mut st), Ok(":3\r\n".into()));
+
+    let lpop_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("LPOP".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("2".into()),
+    ])];
+    assert_eq!(
+        handle_command(lpop_list, &mut st),
+        Ok("*2\r\n$5\r\nmango\r\n$9\r\nraspberry\r\n".into())
+    );
+}
