@@ -28,6 +28,10 @@ pub enum CommandError {
     InvalidRPushCommand,
     #[error("data not found")]
     DataNotFound,
+    #[error("invalid LRANGE command")]
+    InvalidLRangeCommand,
+    #[error("invalid LRANGE command argument")]
+    InvalidLRangeCommandArgument,
 }
 
 impl CommandError {
@@ -42,6 +46,10 @@ impl CommandError {
             CommandError::InvalidSetCommandExpiration => b"-ERR invalid SET command expiration\r\n",
             CommandError::InvalidRPushCommand => b"-ERR invalid RPUSH command\r\n",
             CommandError::DataNotFound => b"-ERR data not found\r\n",
+            CommandError::InvalidLRangeCommand => b"-ERR invalid LRANGE command\r\n",
+            CommandError::InvalidLRangeCommandArgument => {
+                b"-ERR invalid LRANGE command argument\r\n"
+            }
         }
     }
 }
@@ -196,6 +204,59 @@ pub fn handle_command(
             }
 
             return Ok(format!(":{}\r\n", array_length));
+        }
+        "LRANGE" => {
+            if command.args.len() != 3 {
+                return Err(CommandError::InvalidLRangeCommand);
+            }
+
+            let start_index = match command.args[1].parse::<usize>() {
+                Ok(num) => num,
+                Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
+            };
+
+            let mut end_index = match command.args[2].parse::<usize>() {
+                Ok(num) => num,
+                Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
+            };
+
+            if start_index > end_index {
+                return Ok("*0\r\n".to_string());
+            }
+
+            let stored_data = store.get(&command.args[0]);
+
+            match stored_data {
+                Some(value) => {
+                    if let DataType::Array(ref list) = value.data {
+                        if start_index >= list.len() - 1 {
+                            return Ok("*0\r\n".to_string());
+                        } else if end_index > list.len() - 1 {
+                            end_index = list.len() - 1;
+                        }
+
+                        let range = list.get(start_index..=end_index);
+
+                        if let Some(range) = range {
+                            let mut vec = Vec::new();
+
+                            for item in range {
+                                vec.push(format!("${}", item.len()));
+                                vec.push(item.clone());
+                            }
+
+                            return Ok(format!("*{}\r\n{}\r\n", range.len(), vec.join("\r\n")));
+                        } else {
+                            return Ok("*0\r\n".to_string());
+                        }
+                    } else {
+                        return Ok("*0\r\n".to_string());
+                    }
+                }
+                None => {
+                    return Ok("*0\r\n".to_string());
+                }
+            }
         }
         _ => {
             return Err(CommandError::InvalidEchoCommand);
