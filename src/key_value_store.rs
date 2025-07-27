@@ -1,26 +1,14 @@
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 use tokio::time::Instant;
 
+#[derive(Debug, PartialEq)]
 pub enum DataType {
     String(String),
     Array(Vec<String>),
 }
 
-impl FromStr for DataType {
-    type Err = ();
-
-    fn from_str(input: &str) -> Result<DataType, Self::Err> {
-        match input {
-            "Bar" => Ok(DataType::String("Bar".into())),
-            "Baz" => Ok(DataType::String("Baz".into())),
-            "Bat" => Ok(DataType::String("Bat".into())),
-            "Quux" => Ok(DataType::String("Quux".into())),
-            _ => Err(()),
-        }
-    }
-}
-
+#[derive(Debug, PartialEq)]
 pub struct Value {
     pub data: DataType,
     pub expiration: Option<Instant>,

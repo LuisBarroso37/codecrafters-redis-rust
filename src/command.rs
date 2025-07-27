@@ -1,5 +1,4 @@
 use std::time::Duration;
-
 use thiserror::Error;
 use tokio::time::Instant;
 
@@ -8,7 +7,7 @@ use crate::{
     resp::RespValue,
 };
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum CommandError {
     #[error("invalid command")]
     InvalidCommand,
@@ -210,32 +209,30 @@ pub fn handle_command(
                 return Err(CommandError::InvalidLRangeCommand);
             }
 
-            let start_index = match command.args[1].parse::<usize>() {
+            let start_index = match command.args[1].parse::<isize>() {
                 Ok(num) => num,
                 Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
             };
 
-            let mut end_index = match command.args[2].parse::<usize>() {
+            let end_index = match command.args[2].parse::<isize>() {
                 Ok(num) => num,
                 Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
             };
-
-            if start_index > end_index {
-                return Ok("*0\r\n".to_string());
-            }
 
             let stored_data = store.get(&command.args[0]);
 
             match stored_data {
                 Some(value) => {
                     if let DataType::Array(ref list) = value.data {
-                        if start_index >= list.len() - 1 {
+                        let (start, end) = if let Ok((start, end)) =
+                            validate_range_indexes(list, start_index, end_index)
+                        {
+                            (start, end)
+                        } else {
                             return Ok("*0\r\n".to_string());
-                        } else if end_index > list.len() - 1 {
-                            end_index = list.len() - 1;
-                        }
+                        };
 
-                        let range = list.get(start_index..=end_index);
+                        let range = list.get(start..=end);
 
                         if let Some(range) = range {
                             let mut vec = Vec::new();
@@ -262,4 +259,48 @@ pub fn handle_command(
             return Err(CommandError::InvalidEchoCommand);
         }
     }
+}
+
+pub fn validate_range_indexes(
+    list: &[String],
+    start_index: isize,
+    end_index: isize,
+) -> Result<(usize, usize), &str> {
+    let start: usize;
+
+    if start_index < 0 {
+        if start_index.abs() as usize > list.len() {
+            start = 0;
+        } else {
+            start = list.len() - start_index.abs() as usize;
+        }
+    } else {
+        if start_index >= (list.len() - 1) as isize {
+            return Err("Start index is out of bounds");
+        } else {
+            start = start_index as usize;
+        }
+    }
+
+    let end: usize;
+
+    if end_index < 0 {
+        if end_index.abs() as usize > list.len() {
+            return Err("Negative end index is out of bounds");
+        } else {
+            end = list.len() - end_index.abs() as usize;
+        }
+    } else {
+        if end_index > (list.len() - 1) as isize {
+            end = list.len() - 1;
+        } else {
+            end = end_index as usize;
+        }
+    }
+
+    if start > end {
+        return Err("Start index is bigger than end index after processing");
+    }
+
+    Ok((start, end))
 }

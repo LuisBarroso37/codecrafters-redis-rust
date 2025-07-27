@@ -2,7 +2,7 @@ use std::slice::Iter;
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum RespError {
     #[error("invalid UTF-8 sequence")]
     InvalidUtf8,
@@ -28,7 +28,7 @@ impl RespError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum RespValue {
     SimpleString(String),
     Error(String),
