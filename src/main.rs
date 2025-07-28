@@ -1,11 +1,10 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    net::TcpListener,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::Mutex;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    sync::Mutex,
+};
 
 use crate::{
     command::handle_command, input::parse_input, key_value_store::KeyValueStore, resp::RespValue,
@@ -20,21 +19,25 @@ mod state;
 
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
     let state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
+    loop {
+        match listener.accept().await {
+            Ok((mut stream, _addr)) => {
                 let mut store = Arc::clone(&store);
                 let mut state = Arc::clone(&state);
 
                 tokio::spawn(async move {
                     loop {
                         let mut buf = [0; 1024];
-                        let number_of_bytes = stream.read(&mut buf).unwrap();
+                        let number_of_bytes = match stream.read(&mut buf).await {
+                            Ok(n) => n,
+                            Err(_) => break,
+                        };
+
                         if number_of_bytes == 0 {
                             break; // Connection closed
                         }
@@ -42,7 +45,7 @@ async fn main() {
                         let input = match parse_input(&buf) {
                             Ok(input) => input,
                             Err(e) => {
-                                stream.write_all(e.as_bytes()).unwrap();
+                                let _ = stream.write_all(e.as_bytes()).await;
                                 continue;
                             }
                         };
@@ -50,14 +53,28 @@ async fn main() {
                         let parsed_command = match RespValue::parse(input) {
                             Ok(cmd) => cmd,
                             Err(e) => {
-                                stream.write_all(e.as_bytes()).unwrap();
+                                let _ = stream.write_all(e.as_bytes()).await;
                                 continue;
                             }
                         };
 
-                        match handle_command(parsed_command, &mut store, &mut state).await {
-                            Ok(resp) => stream.write_all(resp.as_bytes()).unwrap(),
-                            Err(e) => stream.write_all(e.as_bytes()).unwrap(),
+                        let server_addr = match stream.peer_addr() {
+                            Ok(addr) => addr.to_string(),
+                            Err(_) => {
+                                let _ = stream.write_all(b"ERR failed to get server address").await;
+                                continue;
+                            }
+                        };
+
+                        match handle_command(server_addr, parsed_command, &mut store, &mut state)
+                            .await
+                        {
+                            Ok(resp) => {
+                                let _ = stream.write_all(resp.as_bytes()).await;
+                            }
+                            Err(e) => {
+                                let _ = stream.write_all(e.as_bytes()).await;
+                            }
                         }
                     }
                 });

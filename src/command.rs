@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{Mutex, oneshot},
     time::Instant,
 };
 
@@ -45,6 +45,8 @@ pub enum CommandError {
     InvalidLPopCommandArgument,
     #[error("invalid BLPOP command")]
     InvalidBLPopCommand,
+    #[error("invalid BLPOP command argument")]
+    InvalidBLPopCommandArgument,
 }
 
 impl CommandError {
@@ -68,6 +70,7 @@ impl CommandError {
             CommandError::InvalidLPopCommand => b"-ERR invalid LPOP command\r\n",
             CommandError::InvalidLPopCommandArgument => b"-ERR invalid LPOP command argument\r\n",
             CommandError::InvalidBLPopCommand => b"-ERR invalid BLPOP command\r\n",
+            CommandError::InvalidBLPopCommandArgument => b"-ERR invalid BLPOP command argument\r\n",
         }
     }
 }
@@ -110,6 +113,7 @@ impl Command {
 }
 
 pub async fn handle_command(
+    server_addr: String,
     input: Vec<RespValue>,
     store: &mut Arc<Mutex<KeyValueStore>>,
     state: &mut Arc<Mutex<State>>,
@@ -320,45 +324,64 @@ pub async fn handle_command(
             }
 
             let mut store_guard = store.lock().await;
-            let stored_data = store_guard.get_mut(&command.args[0]);
+            let immediate_result = if let Some(value) = store_guard.get_mut(&command.args[0]) {
+                if let DataType::Array(ref mut list) = value.data {
+                    list.pop_front()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
-            match stored_data {
-                Some(value) => {
-                    if let DataType::Array(ref mut list) = value.data {
-                        let removed_value = list.pop_front();
+            if let Some(value) = immediate_result {
+                drop(store_guard);
+                return Ok(format!(
+                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                    command.args[0].len(),
+                    command.args[0],
+                    value.len(),
+                    value
+                ));
+            }
 
-                        if let Some(value) = removed_value {
-                            return Ok(format!("${}\r\n{}\r\n", value.len(), value));
-                        }
+            drop(store_guard);
 
-                        return Ok("$-1\r\n".to_string());
-                    } else {
+            let duration = command.args[1]
+                .parse::<f64>()
+                .map_err(|_| CommandError::InvalidBLPopCommandArgument)?;
+
+            let (sender, receiver) = oneshot::channel();
+            let subscriber = Subscriber {
+                server_addr: server_addr.clone(),
+                sender,
+            };
+
+            let mut state_guard = state.lock().await;
+            state_guard.add_subscriber("BLPOP".to_string(), command.args[0].clone(), subscriber);
+            drop(state_guard);
+
+            let result = match duration {
+                0.0 => receiver.await,
+                num => match tokio::time::timeout(Duration::from_secs_f64(num), receiver).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let mut state_guard = state.lock().await;
+                        state_guard.remove_subscriber(
+                            "BLPOP",
+                            command.args[0].as_str(),
+                            &server_addr,
+                        );
                         return Ok("$-1\r\n".to_string());
                     }
-                }
-                None => {
-                    drop(store_guard);
-                    let mut state_guard = state.lock().await;
-                    let (sender, mut receiver) = mpsc::channel(32);
-                    let subscriber = Subscriber {
-                        key: command.args[0].clone(),
-                        sender: sender.clone(),
-                    };
+                },
+            };
 
-                    state_guard
-                        .subscribers
-                        .entry("BLPOP".to_string())
-                        .and_modify(|v| v.push_back(subscriber.clone()))
-                        .or_insert(VecDeque::from([subscriber]));
-                    drop(state_guard);
-
-                    let value = receiver.recv().await;
-
-                    let v = if let Some(_) = value {
-                        let mut store_guard = store.lock().await;
-                        let stored_data = store_guard.get_mut(&command.args[0]);
-
-                        if let Some(stored_data) = stored_data {
+            match result {
+                Ok(_) => {
+                    let mut store_guard = store.lock().await;
+                    let popped_value =
+                        if let Some(stored_data) = store_guard.get_mut(&command.args[0]) {
                             if let DataType::Array(ref mut list) = stored_data.data {
                                 list.pop_front()
                             } else {
@@ -366,22 +389,28 @@ pub async fn handle_command(
                             }
                         } else {
                             None
-                        }
-                    } else {
-                        return Ok("$-1\r\n".to_string());
-                    };
+                        };
+                    drop(store_guard);
 
-                    match v {
-                        Some(value) => {
-                            let vec = vec![
-                                format!("${}\r\n{}", command.args[0].len(), command.args[0]),
-                                format!("${}\r\n{}", value.len(), value),
-                            ];
+                    let mut state_guard = state.lock().await;
+                    state_guard.remove_subscriber("BLPOP", command.args[0].as_str(), &server_addr);
+                    drop(state_guard);
 
-                            Ok(format!("*2\r\n{}\r\n", vec.join("\r\n")))
-                        }
+                    match popped_value {
+                        Some(value) => Ok(format!(
+                            "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                            command.args[0].len(),
+                            command.args[0],
+                            value.len(),
+                            value
+                        )),
                         None => Ok("$-1\r\n".to_string()),
                     }
+                }
+                Err(_) => {
+                    let mut state_guard = state.lock().await;
+                    state_guard.remove_subscriber("BLPOP", command.args[0].as_str(), &server_addr);
+                    return Ok("$-1\r\n".to_string());
                 }
             }
         }
@@ -438,12 +467,15 @@ pub async fn push_array_operations(
     }
 
     let mut array_length = 0;
+    let mut was_empty_before = false;
 
     let mut store_guard = store.lock().await;
     store_guard
         .entry(command.args[0].clone())
         .and_modify(|v| {
             if let DataType::Array(ref mut list) = v.data {
+                was_empty_before = list.is_empty();
+
                 for i in 1..command.args.len() {
                     if should_prepend {
                         list.push_front(command.args[i].clone());
@@ -457,6 +489,7 @@ pub async fn push_array_operations(
         })
         .or_insert_with(|| {
             let mut list = VecDeque::new();
+            was_empty_before = true; // New list is considered as was empty before
 
             for i in 1..command.args.len() {
                 if should_prepend {
@@ -473,24 +506,17 @@ pub async fn push_array_operations(
                 expiration: None,
             };
         });
+    drop(store_guard);
 
     if array_length == 0 {
         return Err(CommandError::DataNotFound);
     }
 
-    let state_guard = state.lock().await;
-
-    match state_guard.subscribers.get("BLPOP") {
-        Some(subscribers) => {
-            for subscriber in subscribers {
-                if subscriber.key == command.args[0] {
-                    if let Err(_) = subscriber.sender.send(true).await {
-                        // receiver dropped
-                    }
-                }
-            }
-        }
-        None => {}
+    // Only notify subscribers if the list was empty before and now has elements
+    if was_empty_before && array_length > 0 {
+        let mut state_guard = state.lock().await;
+        state_guard.send_to_subscriber("BLPOP", &command.args[0], true);
+        drop(state_guard);
     }
 
     return Ok(format!(":{}\r\n", array_length));
