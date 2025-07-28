@@ -1,10 +1,14 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::time::Instant;
+use tokio::{
+    sync::{Mutex, mpsc},
+    time::Instant,
+};
 
 use crate::{
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
+    state::{State, Subscriber},
 };
 
 #[derive(Error, Debug, PartialEq)]
@@ -39,6 +43,8 @@ pub enum CommandError {
     InvalidLPopCommand,
     #[error("invalid LPOP command argument")]
     InvalidLPopCommandArgument,
+    #[error("invalid BLPOP command")]
+    InvalidBLPopCommand,
 }
 
 impl CommandError {
@@ -61,6 +67,7 @@ impl CommandError {
             CommandError::InvalidLLenCommand => b"-ERR invalid LLEN command\r\n",
             CommandError::InvalidLPopCommand => b"-ERR invalid LPOP command\r\n",
             CommandError::InvalidLPopCommandArgument => b"-ERR invalid LPOP command argument\r\n",
+            CommandError::InvalidBLPopCommand => b"-ERR invalid BLPOP command\r\n",
         }
     }
 }
@@ -102,9 +109,10 @@ impl Command {
     }
 }
 
-pub fn handle_command(
+pub async fn handle_command(
     input: Vec<RespValue>,
-    store: &mut KeyValueStore,
+    store: &mut Arc<Mutex<KeyValueStore>>,
+    state: &mut Arc<Mutex<State>>,
 ) -> Result<String, CommandError> {
     let command = Command::new(input)?;
 
@@ -123,13 +131,14 @@ pub fn handle_command(
                 return Err(CommandError::InvalidGetCommand);
             }
 
-            let stored_data = store.get(&command.args[0]);
+            let mut store_guard = store.lock().await;
+            let stored_data = store_guard.get(&command.args[0]);
 
             match stored_data {
                 Some(value) => {
                     if let Some(expiration) = value.expiration {
                         if Instant::now() > expiration {
-                            store.remove(&command.args[0]);
+                            store_guard.remove(&command.args[0]);
                             return Ok("$-1\r\n".to_string());
                         }
                     }
@@ -167,7 +176,8 @@ pub fn handle_command(
                 }
             }
 
-            store.insert(
+            let mut store_guard = store.lock().await;
+            store_guard.insert(
                 command.args[0].clone(),
                 Value {
                     data: DataType::String(command.args[1].clone()),
@@ -177,7 +187,7 @@ pub fn handle_command(
 
             return Ok("+OK\r\n".to_string());
         }
-        "RPUSH" => push_array_operations(&command, store, false),
+        "RPUSH" => push_array_operations(&command, store, state, false).await,
         "LRANGE" => {
             if command.args.len() != 3 {
                 return Err(CommandError::InvalidLRangeCommand);
@@ -193,7 +203,8 @@ pub fn handle_command(
                 Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
             };
 
-            let stored_data = store.get(&command.args[0]);
+            let store_guard = store.lock().await;
+            let stored_data = store_guard.get(&command.args[0]);
 
             match stored_data {
                 Some(value) => {
@@ -231,13 +242,14 @@ pub fn handle_command(
                 }
             }
         }
-        "LPUSH" => push_array_operations(&command, store, true),
+        "LPUSH" => push_array_operations(&command, store, state, true).await,
         "LLEN" => {
             if command.args.len() != 1 {
                 return Err(CommandError::InvalidLLenCommand);
             }
 
-            let stored_data = store.get(&command.args[0]);
+            let store_guard = store.lock().await;
+            let stored_data = store_guard.get(&command.args[0]);
 
             match stored_data {
                 Some(value) => {
@@ -257,7 +269,8 @@ pub fn handle_command(
                 return Err(CommandError::InvalidLPopCommand);
             }
 
-            let stored_data = store.get_mut(&command.args[0]);
+            let mut store_guard = store.lock().await;
+            let stored_data = store_guard.get_mut(&command.args[0]);
 
             let amount_of_elements_to_delete = if let Some(val) = command.args.get(1) {
                 val.parse::<usize>()
@@ -301,6 +314,77 @@ pub fn handle_command(
                 }
             }
         }
+        "BLPOP" => {
+            if command.args.len() != 2 {
+                return Err(CommandError::InvalidBLPopCommand);
+            }
+
+            let mut store_guard = store.lock().await;
+            let stored_data = store_guard.get_mut(&command.args[0]);
+
+            match stored_data {
+                Some(value) => {
+                    if let DataType::Array(ref mut list) = value.data {
+                        let removed_value = list.pop_front();
+
+                        if let Some(value) = removed_value {
+                            return Ok(format!("${}\r\n{}\r\n", value.len(), value));
+                        }
+
+                        return Ok("$-1\r\n".to_string());
+                    } else {
+                        return Ok("$-1\r\n".to_string());
+                    }
+                }
+                None => {
+                    drop(store_guard);
+                    let mut state_guard = state.lock().await;
+                    let (sender, mut receiver) = mpsc::channel(32);
+                    let subscriber = Subscriber {
+                        key: command.args[0].clone(),
+                        sender: sender.clone(),
+                    };
+
+                    state_guard
+                        .subscribers
+                        .entry("BLPOP".to_string())
+                        .and_modify(|v| v.push_back(subscriber.clone()))
+                        .or_insert(VecDeque::from([subscriber]));
+                    drop(state_guard);
+
+                    let value = receiver.recv().await;
+
+                    let v = if let Some(_) = value {
+                        let mut store_guard = store.lock().await;
+                        let stored_data = store_guard.get_mut(&command.args[0]);
+
+                        if let Some(stored_data) = stored_data {
+                            if let DataType::Array(ref mut list) = stored_data.data {
+                                list.pop_front()
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        return Ok("$-1\r\n".to_string());
+                    };
+
+                    match v {
+                        Some(value) => {
+                            let vec = vec![
+                                format!("${}\r\n{}", command.args[0].len(), command.args[0]),
+                                format!("${}\r\n{}", value.len(), value),
+                            ];
+
+                            Ok(format!("*2\r\n{}\r\n", vec.join("\r\n")))
+                        }
+                        None => Ok("$-1\r\n".to_string()),
+                    }
+                }
+            }
+        }
         _ => {
             return Err(CommandError::InvalidEchoCommand);
         }
@@ -339,9 +423,10 @@ pub fn validate_range_indexes(
     Ok((start as usize, end as usize))
 }
 
-pub fn push_array_operations(
+pub async fn push_array_operations(
     command: &Command,
-    store: &mut KeyValueStore,
+    store: &mut Arc<Mutex<KeyValueStore>>,
+    state: &mut Arc<Mutex<State>>,
     should_prepend: bool,
 ) -> Result<String, CommandError> {
     if command.args.len() < 2 {
@@ -354,7 +439,8 @@ pub fn push_array_operations(
 
     let mut array_length = 0;
 
-    store
+    let mut store_guard = store.lock().await;
+    store_guard
         .entry(command.args[0].clone())
         .and_modify(|v| {
             if let DataType::Array(ref mut list) = v.data {
@@ -390,6 +476,21 @@ pub fn push_array_operations(
 
     if array_length == 0 {
         return Err(CommandError::DataNotFound);
+    }
+
+    let state_guard = state.lock().await;
+
+    match state_guard.subscribers.get("BLPOP") {
+        Some(subscribers) => {
+            for subscriber in subscribers {
+                if subscriber.key == command.args[0] {
+                    if let Err(_) = subscriber.sender.send(true).await {
+                        // receiver dropped
+                    }
+                }
+            }
+        }
+        None => {}
     }
 
     return Ok(format!(":{}\r\n", array_length));

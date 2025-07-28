@@ -9,23 +9,27 @@ use tokio::sync::Mutex;
 
 use crate::{
     command::handle_command, input::parse_input, key_value_store::KeyValueStore, resp::RespValue,
+    state::State,
 };
 
 mod command;
 mod input;
 mod key_value_store;
 mod resp;
+mod state;
 
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let store = Arc::clone(&store);
+                let mut store = Arc::clone(&store);
+                let mut state = Arc::clone(&state);
 
                 tokio::spawn(async move {
                     loop {
@@ -34,8 +38,6 @@ async fn main() {
                         if number_of_bytes == 0 {
                             break; // Connection closed
                         }
-
-                        let mut store = store.lock().await;
 
                         let input = match parse_input(&buf) {
                             Ok(input) => input,
@@ -53,7 +55,7 @@ async fn main() {
                             }
                         };
 
-                        match handle_command(parsed_command, &mut store) {
+                        match handle_command(parsed_command, &mut store, &mut state).await {
                             Ok(resp) => stream.write_all(resp.as_bytes()).unwrap(),
                             Err(e) => stream.write_all(e.as_bytes()).unwrap(),
                         }

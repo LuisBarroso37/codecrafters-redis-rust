@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
@@ -8,46 +8,54 @@ use codecrafters_redis::{
     command::{CommandError, handle_command},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
+    state::State,
 };
-use tokio::time::Instant;
+use tokio::{sync::Mutex, time::Instant};
 
-#[test]
-fn test_handle_ping_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_ping_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![RespValue::BulkString("PING".into())])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(list, &mut st), Ok("+PONG\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok("+PONG\r\n".into())
+    );
 }
 
-#[test]
-fn test_handle_echo_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_echo_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("ECHO".into()),
         RespValue::BulkString("Hello, World!".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
     assert_eq!(
-        handle_command(list, &mut st),
+        handle_command(list, &mut store, &mut state).await,
         Ok("$13\r\nHello, World!\r\n".into())
     );
 }
 
-#[test]
-fn test_handle_set_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_set_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("SET".into()),
         RespValue::BulkString("grape".into()),
         RespValue::BulkString("mango".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(list, &mut st), Ok("+OK\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok("+OK\r\n".into())
+    );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(
         value,
         Some(&Value {
@@ -62,7 +70,8 @@ async fn test_handle_set_command_with_expiration() {
     tokio::time::pause();
     let now = Instant::now();
 
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("SET".into()),
         RespValue::BulkString("grape".into()),
@@ -71,10 +80,13 @@ async fn test_handle_set_command_with_expiration() {
         RespValue::BulkString("100".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(list, &mut st), Ok("+OK\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok("+OK\r\n".into())
+    );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(
         value,
         Some(&Value {
@@ -84,10 +96,10 @@ async fn test_handle_set_command_with_expiration() {
     );
 }
 
-#[test]
-fn test_handle_set_command_invalid() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_set_command_invalid() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let test_cases = vec![
         (
@@ -129,14 +141,17 @@ fn test_handle_set_command_invalid() {
     ];
 
     for (command, expected) in test_cases {
-        assert_eq!(handle_command(command, &mut st), expected);
+        assert_eq!(
+            handle_command(command, &mut store, &mut state).await,
+            expected
+        );
     }
 }
 
-#[test]
-fn test_handle_get_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_get_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let set_list = vec![RespValue::Array(vec![
         RespValue::BulkString("SET".into()),
@@ -144,7 +159,10 @@ fn test_handle_get_command() {
         RespValue::BulkString("mango".into()),
     ])];
 
-    assert_eq!(handle_command(set_list, &mut st), Ok("+OK\r\n".into()));
+    assert_eq!(
+        handle_command(set_list, &mut store, &mut state).await,
+        Ok("+OK\r\n".into())
+    );
 
     let get_list = vec![RespValue::Array(vec![
         RespValue::BulkString("GET".into()),
@@ -152,11 +170,12 @@ fn test_handle_get_command() {
     ])];
 
     assert_eq!(
-        handle_command(get_list, &mut st),
+        handle_command(get_list, &mut store, &mut state).await,
         Ok("$5\r\nmango\r\n".into())
     );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(
         value,
         Some(&Value {
@@ -171,8 +190,8 @@ async fn test_handle_get_command_with_expiration() {
     tokio::time::pause();
     let now = Instant::now();
 
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let set_list = vec![RespValue::Array(vec![
         RespValue::BulkString("SET".into()),
@@ -182,7 +201,10 @@ async fn test_handle_get_command_with_expiration() {
         RespValue::BulkString("100".into()),
     ])];
 
-    assert_eq!(handle_command(set_list, &mut st), Ok("+OK\r\n".into()));
+    assert_eq!(
+        handle_command(set_list, &mut store, &mut state).await,
+        Ok("+OK\r\n".into())
+    );
 
     let get_list = vec![RespValue::Array(vec![
         RespValue::BulkString("GET".into()),
@@ -190,11 +212,12 @@ async fn test_handle_get_command_with_expiration() {
     ])];
 
     assert_eq!(
-        handle_command(get_list, &mut st),
+        handle_command(get_list, &mut store, &mut state).await,
         Ok("$5\r\nmango\r\n".into())
     );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(
         value,
         Some(&Value {
@@ -202,6 +225,7 @@ async fn test_handle_get_command_with_expiration() {
             expiration: Some(now + Duration::from_millis(100)),
         })
     );
+    drop(store_guard);
 
     let get_list = vec![RespValue::Array(vec![
         RespValue::BulkString("GET".into()),
@@ -210,16 +234,20 @@ async fn test_handle_get_command_with_expiration() {
 
     tokio::time::advance(Duration::from_millis(200)).await;
 
-    assert_eq!(handle_command(get_list, &mut st), Ok("$-1\r\n".into()));
+    assert_eq!(
+        handle_command(get_list, &mut store, &mut state).await,
+        Ok("$-1\r\n".into())
+    );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(value, None);
 }
 
-#[test]
-fn test_handle_get_command_invalid() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_get_command_invalid() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let test_cases = vec![
         (
@@ -237,29 +265,37 @@ fn test_handle_get_command_invalid() {
     ];
 
     for (command, expected) in test_cases {
-        assert_eq!(handle_command(command, &mut st), expected);
+        assert_eq!(
+            handle_command(command, &mut store, &mut state).await,
+            expected
+        );
     }
 }
 
-#[test]
-fn test_handle_get_command_not_found() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_get_command_not_found() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let get_list = vec![RespValue::Array(vec![
         RespValue::BulkString("GET".into()),
         RespValue::BulkString("grape".into()),
     ])];
 
-    assert_eq!(handle_command(get_list, &mut st), Ok("$-1\r\n".into()));
+    assert_eq!(
+        handle_command(get_list, &mut store, &mut state).await,
+        Ok("$-1\r\n".into())
+    );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(value, None);
 }
 
-#[test]
-fn test_handle_rpush_command_insert() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_rpush_command_insert() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
         RespValue::BulkString("grape".into()),
@@ -268,10 +304,13 @@ fn test_handle_rpush_command_insert() {
         RespValue::BulkString("apple".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(
         value,
         Some(&Value {
@@ -285,9 +324,10 @@ fn test_handle_rpush_command_insert() {
     );
 }
 
-#[test]
-fn test_handle_rpush_command_update() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_rpush_command_update() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let insert_list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
         RespValue::BulkString("grape".into()),
@@ -296,10 +336,13 @@ fn test_handle_rpush_command_update() {
         RespValue::BulkString("apple".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(insert_list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(insert_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
-    let inserted_value = st.get("grape");
+    let store_guard = store.lock().await;
+    let inserted_value = store_guard.get("grape");
     assert_eq!(
         inserted_value,
         Some(&Value {
@@ -311,15 +354,20 @@ fn test_handle_rpush_command_update() {
             expiration: None,
         })
     );
+    drop(store_guard);
 
     let update_list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
         RespValue::BulkString("grape".into()),
         RespValue::BulkString("pear".into()),
     ])];
-    assert_eq!(handle_command(update_list, &mut st), Ok(":4\r\n".into()));
+    assert_eq!(
+        handle_command(update_list, &mut store, &mut state).await,
+        Ok(":4\r\n".into())
+    );
 
-    let updated_value = st.get("grape");
+    let store_guard = store.lock().await;
+    let updated_value = store_guard.get("grape");
     assert_eq!(
         updated_value,
         Some(&Value {
@@ -334,25 +382,25 @@ fn test_handle_rpush_command_update() {
     );
 }
 
-#[test]
-fn test_handle_rpush_command_invalid() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_rpush_command_invalid() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
         RespValue::BulkString("grape".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
     assert_eq!(
-        handle_command(list, &mut st),
+        handle_command(list, &mut store, &mut state).await,
         Err(CommandError::InvalidRPushCommand)
     );
 }
 
-#[test]
-fn test_handle_lrange_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_lrange_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
@@ -365,7 +413,10 @@ fn test_handle_lrange_command() {
         RespValue::BulkString("pear".into()),
     ])];
 
-    assert_eq!(handle_command(list, &mut st), Ok(":6\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok(":6\r\n".into())
+    );
 
     let test_cases = vec![
         (
@@ -407,13 +458,17 @@ fn test_handle_lrange_command() {
     ];
 
     for (command, expected) in test_cases {
-        assert_eq!(handle_command(command, &mut st), expected);
+        assert_eq!(
+            handle_command(command, &mut store, &mut state).await,
+            expected
+        );
     }
 }
 
-#[test]
-fn test_handle_lpush_command_insert() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_lpush_command_insert() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPUSH".into()),
         RespValue::BulkString("grape".into()),
@@ -422,10 +477,13 @@ fn test_handle_lpush_command_insert() {
         RespValue::BulkString("apple".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
-    let value = st.get("grape");
+    let store_guard = store.lock().await;
+    let value = store_guard.get("grape");
     assert_eq!(
         value,
         Some(&Value {
@@ -439,9 +497,10 @@ fn test_handle_lpush_command_insert() {
     );
 }
 
-#[test]
-fn test_handle_lpush_command_update() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_lpush_command_update() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let insert_list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPUSH".into()),
         RespValue::BulkString("grape".into()),
@@ -450,10 +509,13 @@ fn test_handle_lpush_command_update() {
         RespValue::BulkString("apple".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
-    assert_eq!(handle_command(insert_list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(insert_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
-    let inserted_value = st.get("grape");
+    let store_guard = store.lock().await;
+    let inserted_value = store_guard.get("grape");
     assert_eq!(
         inserted_value,
         Some(&Value {
@@ -465,15 +527,20 @@ fn test_handle_lpush_command_update() {
             expiration: None,
         })
     );
+    drop(store_guard);
 
     let update_list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPUSH".into()),
         RespValue::BulkString("grape".into()),
         RespValue::BulkString("pear".into()),
     ])];
-    assert_eq!(handle_command(update_list, &mut st), Ok(":4\r\n".into()));
+    assert_eq!(
+        handle_command(update_list, &mut store, &mut state).await,
+        Ok(":4\r\n".into())
+    );
 
-    let updated_value = st.get("grape");
+    let store_guard = store.lock().await;
+    let updated_value = store_guard.get("grape");
     assert_eq!(
         updated_value,
         Some(&Value {
@@ -488,25 +555,25 @@ fn test_handle_lpush_command_update() {
     );
 }
 
-#[test]
-fn test_handle_lpush_command_invalid() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+#[tokio::test]
+async fn test_handle_lpush_command_invalid() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPUSH".into()),
         RespValue::BulkString("grape".into()),
     ])];
 
-    let mut st = store.lock().unwrap();
     assert_eq!(
-        handle_command(list, &mut st),
+        handle_command(list, &mut store, &mut state).await,
         Err(CommandError::InvalidLPushCommand)
     );
 }
 
-#[test]
-fn test_handle_llen_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_llen_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let rpush_list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
@@ -515,31 +582,40 @@ fn test_handle_llen_command() {
         RespValue::BulkString("raspberry".into()),
         RespValue::BulkString("apple".into()),
     ])];
-    assert_eq!(handle_command(rpush_list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(rpush_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
     let llen_list = vec![RespValue::Array(vec![
         RespValue::BulkString("LLEN".into()),
         RespValue::BulkString("grape".into()),
     ])];
-    assert_eq!(handle_command(llen_list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(llen_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 }
 
-#[test]
-fn test_handle_llen_command_not_found() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_llen_command_not_found() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("LLEN".into()),
         RespValue::BulkString("grape".into()),
     ])];
-    assert_eq!(handle_command(list, &mut st), Ok(":0\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok(":0\r\n".into())
+    );
 }
 
-#[test]
-fn test_handle_llen_command_wrong_data_type() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_llen_command_wrong_data_type() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let set_list = vec![RespValue::Array(vec![
         RespValue::BulkString("SET".into()),
@@ -547,31 +623,37 @@ fn test_handle_llen_command_wrong_data_type() {
         RespValue::BulkString("mango".into()),
     ])];
 
-    assert_eq!(handle_command(set_list, &mut st), Ok("+OK\r\n".into()));
+    assert_eq!(
+        handle_command(set_list, &mut store, &mut state).await,
+        Ok("+OK\r\n".into())
+    );
 
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("LLEN".into()),
         RespValue::BulkString("grape".into()),
     ])];
-    assert_eq!(handle_command(list, &mut st), Ok(":0\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok(":0\r\n".into())
+    );
 }
 
-#[test]
-fn test_handle_llen_command_invalid() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_llen_command_invalid() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let list = vec![RespValue::Array(vec![RespValue::BulkString("LLEN".into())])];
     assert_eq!(
-        handle_command(list, &mut st),
+        handle_command(list, &mut store, &mut state).await,
         Err(CommandError::InvalidLLenCommand)
     );
 }
 
-#[test]
-fn test_handle_lpop_command() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_lpop_command() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let rpush_list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
@@ -580,46 +662,52 @@ fn test_handle_lpop_command() {
         RespValue::BulkString("raspberry".into()),
         RespValue::BulkString("apple".into()),
     ])];
-    assert_eq!(handle_command(rpush_list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(rpush_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
     let lpop_list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPOP".into()),
         RespValue::BulkString("grape".into()),
     ])];
     assert_eq!(
-        handle_command(lpop_list, &mut st),
+        handle_command(lpop_list, &mut store, &mut state).await,
         Ok("$5\r\nmango\r\n".into())
     );
 }
 
-#[test]
-fn test_handle_lpop_command_invalid() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_lpop_command_invalid() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let list = vec![RespValue::Array(vec![RespValue::BulkString("LPOP".into())])];
     assert_eq!(
-        handle_command(list, &mut st),
+        handle_command(list, &mut store, &mut state).await,
         Err(CommandError::InvalidLPopCommand)
     );
 }
 
-#[test]
-fn test_handle_lpop_command_not_found() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_lpop_command_not_found() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPOP".into()),
         RespValue::BulkString("grape".into()),
     ])];
-    assert_eq!(handle_command(list, &mut st), Ok("$-1\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok("$-1\r\n".into())
+    );
 }
 
-#[test]
-fn test_handle_lpop_command_wrong_data_type() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_lpop_command_wrong_data_type() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let set_list = vec![RespValue::Array(vec![
         RespValue::BulkString("SET".into()),
@@ -627,19 +715,25 @@ fn test_handle_lpop_command_wrong_data_type() {
         RespValue::BulkString("mango".into()),
     ])];
 
-    assert_eq!(handle_command(set_list, &mut st), Ok("+OK\r\n".into()));
+    assert_eq!(
+        handle_command(set_list, &mut store, &mut state).await,
+        Ok("+OK\r\n".into())
+    );
 
     let list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPOP".into()),
         RespValue::BulkString("grape".into()),
     ])];
-    assert_eq!(handle_command(list, &mut st), Ok("$-1\r\n".into()));
+    assert_eq!(
+        handle_command(list, &mut store, &mut state).await,
+        Ok("$-1\r\n".into())
+    );
 }
 
-#[test]
-fn test_handle_lpop_command_multiple_elements() {
-    let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut st = store.lock().unwrap();
+#[tokio::test]
+async fn test_handle_lpop_command_multiple_elements() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
     let rpush_list = vec![RespValue::Array(vec![
         RespValue::BulkString("RPUSH".into()),
@@ -648,7 +742,10 @@ fn test_handle_lpop_command_multiple_elements() {
         RespValue::BulkString("raspberry".into()),
         RespValue::BulkString("apple".into()),
     ])];
-    assert_eq!(handle_command(rpush_list, &mut st), Ok(":3\r\n".into()));
+    assert_eq!(
+        handle_command(rpush_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
 
     let lpop_list = vec![RespValue::Array(vec![
         RespValue::BulkString("LPOP".into()),
@@ -656,7 +753,36 @@ fn test_handle_lpop_command_multiple_elements() {
         RespValue::BulkString("2".into()),
     ])];
     assert_eq!(
-        handle_command(lpop_list, &mut st),
+        handle_command(lpop_list, &mut store, &mut state).await,
         Ok("*2\r\n$5\r\nmango\r\n$9\r\nraspberry\r\n".into())
+    );
+}
+
+#[tokio::test]
+async fn test_handle_blpop_command_direct_response() {
+    let mut store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
+
+    let rpush_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("RPUSH".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("mango".into()),
+        RespValue::BulkString("raspberry".into()),
+        RespValue::BulkString("apple".into()),
+    ])];
+    assert_eq!(
+        handle_command(rpush_list, &mut store, &mut state).await,
+        Ok(":3\r\n".into())
+    );
+
+    let blpop_list = vec![RespValue::Array(vec![
+        RespValue::BulkString("BLPOP".into()),
+        RespValue::BulkString("grape".into()),
+        RespValue::BulkString("0".into()),
+    ])];
+
+    assert_eq!(
+        handle_command(blpop_list, &mut store, &mut state).await,
+        Ok("$5\r\nmango\r\n".into())
     );
 }
