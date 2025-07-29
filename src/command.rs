@@ -47,6 +47,8 @@ pub enum CommandError {
     InvalidBLPopCommand,
     #[error("invalid BLPOP command argument")]
     InvalidBLPopCommandArgument,
+    #[error("invalid TYPE command")]
+    InvalidTypeCommand,
 }
 
 impl CommandError {
@@ -71,6 +73,7 @@ impl CommandError {
             CommandError::InvalidLPopCommandArgument => b"-ERR invalid LPOP command argument\r\n",
             CommandError::InvalidBLPopCommand => b"-ERR invalid BLPOP command\r\n",
             CommandError::InvalidBLPopCommandArgument => b"-ERR invalid BLPOP command argument\r\n",
+            CommandError::InvalidTypeCommand => b"-ERR invalid TYPE command\r\n",
         }
     }
 }
@@ -121,14 +124,14 @@ pub async fn handle_command(
     let command = Command::new(input)?;
 
     match command.name.as_str() {
-        "PING" => Ok("+PONG\r\n".to_string()),
+        "PING" => Ok(RespValue::SimpleString("PONG".to_string()).encode()),
         "ECHO" => {
             if command.args.len() != 1 {
                 return Err(CommandError::InvalidEchoCommand);
             }
 
             let arg = command.args[0].clone();
-            return Ok(format!("${}\r\n{}\r\n", arg.len(), arg));
+            return Ok(RespValue::BulkString(arg).encode());
         }
         "GET" => {
             if command.args.len() != 1 {
@@ -143,21 +146,21 @@ pub async fn handle_command(
                     if let Some(expiration) = value.expiration {
                         if Instant::now() > expiration {
                             store_guard.remove(&command.args[0]);
-                            return Ok("$-1\r\n".to_string());
+                            return Ok(RespValue::Null.encode());
                         }
                     }
 
                     match value.data {
                         DataType::String(ref s) => {
-                            return Ok(format!("${}\r\n{}\r\n", s.len(), s));
+                            return Ok(RespValue::BulkString(s.clone()).encode());
                         }
                         _ => {
-                            return Ok("$-1\r\n".to_string());
+                            return Ok(RespValue::Null.encode());
                         }
                     }
                 }
                 None => {
-                    return Ok("$-1\r\n".to_string());
+                    return Ok(RespValue::Null.encode());
                 }
             }
         }
@@ -189,7 +192,7 @@ pub async fn handle_command(
                 },
             );
 
-            return Ok("+OK\r\n".to_string());
+            return Ok(RespValue::SimpleString("OK".to_string()).encode());
         }
         "RPUSH" => push_array_operations(&command, store, state, false).await,
         "LRANGE" => {
@@ -218,31 +221,25 @@ pub async fn handle_command(
                         {
                             (start, end)
                         } else {
-                            return Ok("*0\r\n".to_string());
+                            return Ok(RespValue::Array(vec![]).encode());
                         };
 
-                        let range = list.range(start..=end).collect::<Vec<&String>>();
+                        let range = list
+                            .range(start..=end)
+                            .map(|s| s.to_string())
+                            .collect::<Vec<String>>();
 
                         if !range.is_empty() {
-                            let formatted_vec = range
-                                .iter()
-                                .map(|s| format!("${}\r\n{}", s.len(), s))
-                                .collect::<Vec<String>>();
-
-                            return Ok(format!(
-                                "*{}\r\n{}\r\n",
-                                formatted_vec.len(),
-                                formatted_vec.join("\r\n")
-                            ));
+                            return Ok(RespValue::encode_array_from_strings(range));
                         } else {
-                            return Ok("*0\r\n".to_string());
+                            return Ok(RespValue::Array(vec![]).encode());
                         }
                     } else {
-                        return Ok("*0\r\n".to_string());
+                        return Ok(RespValue::Array(vec![]).encode());
                     }
                 }
                 None => {
-                    return Ok("*0\r\n".to_string());
+                    return Ok(RespValue::Array(vec![]).encode());
                 }
             }
         }
@@ -258,13 +255,13 @@ pub async fn handle_command(
             match stored_data {
                 Some(value) => {
                     if let DataType::Array(ref list) = value.data {
-                        return Ok(format!(":{}\r\n", list.len()));
+                        return Ok(RespValue::Integer(list.len() as i64).encode());
                     } else {
-                        return Ok(":0\r\n".to_string());
+                        return Ok(RespValue::Integer(0).encode());
                     }
                 }
                 None => {
-                    return Ok(":0\r\n".to_string());
+                    return Ok(RespValue::Integer(0).encode());
                 }
             }
         }
@@ -295,26 +292,18 @@ pub async fn handle_command(
                         }
 
                         if vec.len() == 0 {
-                            return Ok("$-1\r\n".to_string());
+                            return Ok(RespValue::Null.encode());
                         } else if vec.len() == 1 {
-                            return Ok(format!("${}\r\n{}\r\n", vec[0].len(), vec[0]));
+                            return Ok(RespValue::BulkString(vec[0].clone()).encode());
                         } else {
-                            let formatted_vec = vec
-                                .iter()
-                                .map(|s| format!("${}\r\n{}", s.len(), s))
-                                .collect::<Vec<String>>();
-                            return Ok(format!(
-                                "*{}\r\n{}\r\n",
-                                vec.len(),
-                                formatted_vec.join("\r\n")
-                            ));
+                            return Ok(RespValue::encode_array_from_strings(vec));
                         }
                     } else {
-                        return Ok("$-1\r\n".to_string());
+                        return Ok(RespValue::Null.encode());
                     }
                 }
                 None => {
-                    return Ok("$-1\r\n".to_string());
+                    return Ok(RespValue::Null.encode());
                 }
             }
         }
@@ -333,19 +322,14 @@ pub async fn handle_command(
             } else {
                 None
             };
+            drop(store_guard);
 
             if let Some(value) = immediate_result {
-                drop(store_guard);
-                return Ok(format!(
-                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
-                    command.args[0].len(),
-                    command.args[0],
-                    value.len(),
-                    value
-                ));
+                return Ok(RespValue::encode_array_from_strings(vec![
+                    command.args[0].clone(),
+                    value,
+                ]));
             }
-
-            drop(store_guard);
 
             let duration = command.args[1]
                 .parse::<f64>()
@@ -372,7 +356,7 @@ pub async fn handle_command(
                             command.args[0].as_str(),
                             &server_addr,
                         );
-                        return Ok("$-1\r\n".to_string());
+                        return Ok(RespValue::Null.encode());
                     }
                 },
             };
@@ -397,25 +381,42 @@ pub async fn handle_command(
                     drop(state_guard);
 
                     match popped_value {
-                        Some(value) => Ok(format!(
-                            "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
-                            command.args[0].len(),
-                            command.args[0],
-                            value.len(),
-                            value
-                        )),
-                        None => Ok("$-1\r\n".to_string()),
+                        Some(value) => Ok(RespValue::encode_array_from_strings(vec![
+                            command.args[0].clone(),
+                            value,
+                        ])),
+                        None => Ok(RespValue::Null.encode()),
                     }
                 }
                 Err(_) => {
                     let mut state_guard = state.lock().await;
                     state_guard.remove_subscriber("BLPOP", command.args[0].as_str(), &server_addr);
-                    return Ok("$-1\r\n".to_string());
+                    return Ok(RespValue::Null.encode());
                 }
             }
         }
+        "TYPE" => {
+            if command.args.len() != 1 {
+                return Err(CommandError::InvalidTypeCommand);
+            }
+
+            let store_guard = store.lock().await;
+
+            if let Some(value) = store_guard.get(&command.args[0]) {
+                match value.data {
+                    DataType::String(_) => {
+                        return Ok(RespValue::SimpleString("string".to_string()).encode());
+                    }
+                    DataType::Array(_) => {
+                        return Ok(RespValue::SimpleString("list".to_string()).encode());
+                    }
+                }
+            } else {
+                return Ok(RespValue::SimpleString("none".to_string()).encode());
+            }
+        }
         _ => {
-            return Err(CommandError::InvalidEchoCommand);
+            return Err(CommandError::InvalidCommand);
         }
     }
 }
@@ -516,8 +517,7 @@ pub async fn push_array_operations(
     if was_empty_before && array_length > 0 {
         let mut state_guard = state.lock().await;
         state_guard.send_to_subscriber("BLPOP", &command.args[0], true);
-        drop(state_guard);
     }
 
-    return Ok(format!(":{}\r\n", array_length));
+    return Ok(RespValue::Integer(array_length as i64).encode());
 }

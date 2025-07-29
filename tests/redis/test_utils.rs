@@ -203,8 +203,16 @@ impl TestUtils {
         ])]
     }
 
+    /// Create a TYPE command
+    pub fn type_command(key: &str) -> Vec<RespValue> {
+        vec![RespValue::Array(vec![
+            RespValue::BulkString("TYPE".to_string()),
+            RespValue::BulkString(key.to_string()),
+        ])]
+    }
+
     /// Create an invalid command
-    pub fn invalid_command(args: Vec<&str>) -> Vec<RespValue> {
+    pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();
 
         for arg in args {

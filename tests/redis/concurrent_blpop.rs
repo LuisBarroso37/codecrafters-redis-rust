@@ -255,7 +255,7 @@ async fn test_blpop_invalid_arguments() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::invalid_command(vec!["BLPOP", "test_list"]),
+        TestUtils::invalid_command(&["BLPOP", "test_list"]),
         &TestUtils::server_addr(12400),
         CommandError::InvalidBLPopCommand,
     )

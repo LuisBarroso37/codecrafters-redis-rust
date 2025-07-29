@@ -32,6 +32,7 @@ pub enum RespValue {
     Integer(i64),
     BulkString(String),
     Array(Vec<RespValue>),
+    Null,
 }
 
 impl RespValue {
@@ -98,5 +99,50 @@ impl RespValue {
         } else {
             return Err(RespError::UnknownRespType);
         }
+    }
+
+    pub fn encode(&self) -> String {
+        match self {
+            RespValue::SimpleString(s) => {
+                format!("+{}\r\n", s)
+            }
+            RespValue::Error(e) => {
+                format!("-{}\r\n", e)
+            }
+            RespValue::Integer(i) => {
+                format!(":{}\r\n", i)
+            }
+            RespValue::BulkString(s) => {
+                format!("${}\r\n{}\r\n", s.len(), s)
+            }
+            RespValue::Array(elements) => {
+                let mut encoded_elements = Vec::new();
+                for element in elements {
+                    encoded_elements.push(element.encode());
+                }
+
+                format!(
+                    "*{}\r\n{}",
+                    encoded_elements.len(),
+                    encoded_elements.join("")
+                )
+            }
+            RespValue::Null => {
+                format!("$-1\r\n")
+            }
+        }
+    }
+
+    pub fn encode_array_from_strings(elements: Vec<String>) -> String {
+        let mut encoded_elements = Vec::new();
+        for element in elements {
+            encoded_elements.push(RespValue::BulkString(element).encode());
+        }
+
+        format!(
+            "*{}\r\n{}",
+            encoded_elements.len(),
+            encoded_elements.join("")
+        )
     }
 }

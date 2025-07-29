@@ -85,19 +85,19 @@ async fn test_handle_set_command_invalid() {
 
     let test_cases = vec![
         (
-            TestUtils::invalid_command(vec!["SET", "grape"]),
+            TestUtils::invalid_command(&["SET", "grape"]),
             CommandError::InvalidSetCommand,
         ),
         (
-            TestUtils::invalid_command(vec!["SET", "grape", "mango", "px"]),
+            TestUtils::invalid_command(&["SET", "grape", "mango", "px"]),
             CommandError::InvalidSetCommand,
         ),
         (
-            TestUtils::invalid_command(vec!["SET", "grape", "mango", "random", "100"]),
+            TestUtils::invalid_command(&["SET", "grape", "mango", "random", "100"]),
             CommandError::InvalidSetCommandArgument,
         ),
         (
-            TestUtils::invalid_command(vec!["SET", "grape", "mango", "px", "random"]),
+            TestUtils::invalid_command(&["SET", "grape", "mango", "px", "random"]),
             CommandError::InvalidSetCommandExpiration,
         ),
     ];
@@ -174,7 +174,7 @@ async fn test_handle_get_command_with_expiration() {
     env.exec_command_ok(
         TestUtils::get_command("grape"),
         &TestUtils::server_addr(41844),
-        &&TestUtils::expected_null(),
+        &TestUtils::expected_null(),
     )
     .await;
 
@@ -196,11 +196,11 @@ async fn test_handle_get_command_invalid() {
 
     let test_cases = vec![
         (
-            TestUtils::invalid_command(vec!["GET"]),
+            TestUtils::invalid_command(&["GET"]),
             CommandError::InvalidGetCommand,
         ),
         (
-            TestUtils::invalid_command(vec!["GET", "grape", "mango"]),
+            TestUtils::invalid_command(&["GET", "grape", "mango"]),
             CommandError::InvalidGetCommand,
         ),
     ];
@@ -218,7 +218,7 @@ async fn test_handle_get_command_not_found() {
     env.exec_command_ok(
         TestUtils::get_command("grape"),
         &TestUtils::server_addr(41844),
-        &&TestUtils::expected_null(),
+        &TestUtils::expected_null(),
     )
     .await;
 
@@ -307,7 +307,7 @@ async fn test_handle_rpush_command_invalid() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::invalid_command(vec!["RPUSH"]),
+        TestUtils::invalid_command(&["RPUSH"]),
         &TestUtils::server_addr(41844),
         CommandError::InvalidRPushCommand,
     )
@@ -430,7 +430,7 @@ async fn test_handle_lpush_command_invalid() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::invalid_command(vec!["LPUSH", "grape"]),
+        TestUtils::invalid_command(&["LPUSH", "grape"]),
         &TestUtils::server_addr(41844),
         CommandError::InvalidLPushCommand,
     )
@@ -492,7 +492,7 @@ async fn test_handle_llen_command_invalid() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::invalid_command(vec!["LLEN"]),
+        TestUtils::invalid_command(&["LLEN"]),
         &TestUtils::server_addr(41844),
         CommandError::InvalidLLenCommand,
     )
@@ -551,7 +551,7 @@ async fn test_handle_lpop_command_invalid() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::invalid_command(vec!["LPOP"]),
+        TestUtils::invalid_command(&["LPOP"]),
         &TestUtils::server_addr(41844),
         CommandError::InvalidLPopCommand,
     )
@@ -577,7 +577,7 @@ async fn test_handle_lpop_command_wrong_data_type() {
     env.exec_command_ok(
         TestUtils::set_command("grape", "mango"),
         &TestUtils::server_addr(41844),
-        &&TestUtils::expected_simple_string("OK"),
+        &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
@@ -648,6 +648,68 @@ async fn test_handle_blpop_command_direct_response() {
         TestUtils::blpop_command("grape", "0"),
         &TestUtils::server_addr(41844),
         &TestUtils::expected_array(&["grape", "mango"]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_type_command_string() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::set_command("grape", "mango"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    env.exec_command_ok(
+        TestUtils::type_command("grape"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("string"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_type_command_list() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_integer(3),
+    )
+    .await;
+
+    env.exec_command_ok(
+        TestUtils::type_command("grape"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("list"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_type_command_missing_key() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::type_command("grape"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("none"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_type_command_invalid() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_err(
+        TestUtils::invalid_command(&["TYPE"]),
+        &TestUtils::server_addr(41844),
+        CommandError::InvalidTypeCommand,
     )
     .await;
 }
