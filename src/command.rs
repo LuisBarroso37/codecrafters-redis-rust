@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::{
     sync::{Mutex, oneshot},
@@ -49,6 +53,10 @@ pub enum CommandError {
     InvalidBLPopCommandArgument,
     #[error("invalid TYPE command")]
     InvalidTypeCommand,
+    #[error("invalid XADD command")]
+    InvalidXAddCommand,
+    #[error("invalid XADD stream ID")]
+    InvalidXAddStreamId,
 }
 
 impl CommandError {
@@ -74,6 +82,8 @@ impl CommandError {
             CommandError::InvalidBLPopCommand => b"-ERR invalid BLPOP command\r\n",
             CommandError::InvalidBLPopCommandArgument => b"-ERR invalid BLPOP command argument\r\n",
             CommandError::InvalidTypeCommand => b"-ERR invalid TYPE command\r\n",
+            CommandError::InvalidXAddCommand => b"-ERR invalid XADD command\r\n",
+            CommandError::InvalidXAddStreamId => b"-ERR invalid XADD stream ID\r\n",
         }
     }
 }
@@ -410,10 +420,59 @@ pub async fn handle_command(
                     DataType::Array(_) => {
                         return Ok(RespValue::SimpleString("list".to_string()).encode());
                     }
+                    DataType::Stream(_) => {
+                        return Ok(RespValue::SimpleString("stream".to_string()).encode());
+                    }
                 }
             } else {
                 return Ok(RespValue::SimpleString("none".to_string()).encode());
             }
+        }
+        "XADD" => {
+            if command.args.len() < 4 {
+                return Err(CommandError::InvalidXAddCommand);
+            }
+
+            if command.args[1].as_str().split("-").count() != 2 {
+                return Err(CommandError::InvalidXAddStreamId);
+            }
+
+            let key_value_pairs = command.args[2..].to_vec();
+
+            let mut entries = HashMap::new();
+
+            for (key, value) in key_value_pairs
+                .chunks(2)
+                .map(|chunk| (chunk.get(0), chunk.get(1)))
+            {
+                if let (Some(key), Some(value)) = (key, value) {
+                    entries.insert(key.clone(), value.clone());
+                } else {
+                    return Err(CommandError::InvalidXAddCommand);
+                }
+            }
+
+            let key = command.args[0].clone();
+            let stream_id = command.args[1].clone();
+            let mut store_guard = store.lock().await;
+
+            if let Some(value) = store_guard.get_mut(&key) {
+                if let DataType::Stream(ref mut stream) = value.data {
+                    stream.insert(stream_id, entries);
+                } else {
+                    return Err(CommandError::DataNotFound);
+                }
+            } else {
+                store_guard.insert(
+                    key,
+                    Value {
+                        data: DataType::Stream(HashMap::from([(stream_id, entries)])),
+                        expiration: None,
+                    },
+                );
+            }
+
+            Ok(RespValue::BulkString(command.args[1].clone()).encode())
         }
         _ => {
             return Err(CommandError::InvalidCommand);

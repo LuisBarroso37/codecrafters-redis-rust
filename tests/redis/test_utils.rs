@@ -211,6 +211,20 @@ impl TestUtils {
         ])]
     }
 
+    pub fn xadd_command(key: &str, stream_id: &str, entries: &[&str]) -> Vec<RespValue> {
+        let mut vec = vec![
+            RespValue::BulkString("XADD".to_string()),
+            RespValue::BulkString(key.to_string()),
+            RespValue::BulkString(stream_id.to_string()),
+        ];
+
+        for entry in entries {
+            vec.push(RespValue::BulkString(entry.to_string()));
+        }
+
+        vec![RespValue::Array(vec)]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();

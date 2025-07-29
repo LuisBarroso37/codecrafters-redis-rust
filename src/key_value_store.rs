@@ -2,10 +2,13 @@ use std::collections::{HashMap, VecDeque};
 
 use tokio::time::Instant;
 
+pub type Stream = HashMap<String, String>;
+
 #[derive(Debug, PartialEq)]
 pub enum DataType {
     String(String),
     Array(VecDeque<String>),
+    Stream(HashMap<String, Stream>),
 }
 
 #[derive(Debug, PartialEq)]
