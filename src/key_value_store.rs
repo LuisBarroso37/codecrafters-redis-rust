@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use tokio::time::Instant;
 
@@ -8,7 +8,7 @@ pub type Stream = HashMap<String, String>;
 pub enum DataType {
     String(String),
     Array(VecDeque<String>),
-    Stream(HashMap<String, Stream>),
+    Stream(BTreeMap<String, Stream>),
 }
 
 #[derive(Debug, PartialEq)]

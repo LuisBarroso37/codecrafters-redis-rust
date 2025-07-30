@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod command;
+mod command_utils;
 mod input;
 mod key_value_store;
 mod resp;
@@ -73,7 +74,7 @@ async fn main() {
                                 let _ = stream.write_all(resp.as_bytes()).await;
                             }
                             Err(e) => {
-                                let _ = stream.write_all(e.as_bytes()).await;
+                                let _ = stream.write_all(e.as_string().as_bytes()).await;
                             }
                         }
                     }

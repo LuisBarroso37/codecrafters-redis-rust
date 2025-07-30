@@ -3,7 +3,7 @@ use codecrafters_redis::{
     key_value_store::{DataType, Value},
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     time::Duration,
 };
 use tokio::time::Instant;
@@ -759,7 +759,7 @@ async fn test_handle_xadd_command() {
     assert_eq!(
         value,
         Some(&Value {
-            data: DataType::Stream(HashMap::from([(
+            data: DataType::Stream(BTreeMap::from([(
                 stream_id.to_string(),
                 HashMap::from([
                     ("mango".to_string(), "apple".to_string()),
@@ -790,7 +790,7 @@ async fn test_handle_xadd_command_invalid_data_type() {
             &["mango", "apple", "raspberry", "pear"],
         ),
         &TestUtils::server_addr(41844),
-        CommandError::DataNotFound,
+        CommandError::InvalidDataTypeForKey,
     )
     .await;
 }
@@ -821,7 +821,7 @@ async fn test_handle_xadd_command_invalid() {
         ),
         (
             TestUtils::invalid_command(&["XADD", "fruits", "invalid_stream_id", "mango", "apple"]),
-            CommandError::InvalidXAddStreamId,
+            CommandError::InvalidXAddStreamId("Invalid stream ID format".to_string()),
         ),
     ];
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::Arc,
     time::Duration,
 };
@@ -10,6 +10,7 @@ use tokio::{
 };
 
 use crate::{
+    command_utils::{validate_range_indexes, validate_stream_id},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
     state::{State, Subscriber},
@@ -55,35 +56,78 @@ pub enum CommandError {
     InvalidTypeCommand,
     #[error("invalid XADD command")]
     InvalidXAddCommand,
-    #[error("invalid XADD stream ID")]
-    InvalidXAddStreamId,
+    #[error("{0}")]
+    InvalidXAddStreamId(String),
+    #[error("invalid data type for key")]
+    InvalidDataTypeForKey,
 }
 
 impl CommandError {
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_string(&self) -> String {
         match self {
-            CommandError::InvalidCommand => b"-ERR invalid command\r\n",
-            CommandError::InvalidCommandArgument => b"-ERR invalid command argument\r\n",
-            CommandError::InvalidEchoCommand => b"-ERR invalid ECHO command\r\n",
-            CommandError::InvalidGetCommand => b"-ERR invalid GET command\r\n",
-            CommandError::InvalidSetCommand => b"-ERR invalid SET command\r\n",
-            CommandError::InvalidSetCommandArgument => b"-ERR invalid SET command argument\r\n",
-            CommandError::InvalidSetCommandExpiration => b"-ERR invalid SET command expiration\r\n",
-            CommandError::InvalidRPushCommand => b"-ERR invalid RPUSH command\r\n",
-            CommandError::DataNotFound => b"-ERR data not found\r\n",
-            CommandError::InvalidLRangeCommand => b"-ERR invalid LRANGE command\r\n",
-            CommandError::InvalidLRangeCommandArgument => {
-                b"-ERR invalid LRANGE command argument\r\n"
+            CommandError::InvalidCommand => {
+                RespValue::Error("ERR Invalid command".to_string()).encode()
             }
-            CommandError::InvalidLPushCommand => b"-ERR invalid LPUSH command\r\n",
-            CommandError::InvalidLLenCommand => b"-ERR invalid LLEN command\r\n",
-            CommandError::InvalidLPopCommand => b"-ERR invalid LPOP command\r\n",
-            CommandError::InvalidLPopCommandArgument => b"-ERR invalid LPOP command argument\r\n",
-            CommandError::InvalidBLPopCommand => b"-ERR invalid BLPOP command\r\n",
-            CommandError::InvalidBLPopCommandArgument => b"-ERR invalid BLPOP command argument\r\n",
-            CommandError::InvalidTypeCommand => b"-ERR invalid TYPE command\r\n",
-            CommandError::InvalidXAddCommand => b"-ERR invalid XADD command\r\n",
-            CommandError::InvalidXAddStreamId => b"-ERR invalid XADD stream ID\r\n",
+            CommandError::InvalidCommandArgument => {
+                RespValue::Error("ERR Invalid command argument".to_string()).encode()
+            }
+            CommandError::InvalidEchoCommand => {
+                RespValue::Error("ERR Invalid ECHO command".to_string()).encode()
+            }
+            CommandError::InvalidGetCommand => {
+                RespValue::Error("ERR Invalid GET command".to_string()).encode()
+            }
+            CommandError::InvalidSetCommand => {
+                RespValue::Error("ERR Invalid SET command".to_string()).encode()
+            }
+            CommandError::InvalidSetCommandArgument => {
+                RespValue::Error("ERR Invalid SET command argument".to_string()).encode()
+            }
+            CommandError::InvalidSetCommandExpiration => {
+                RespValue::Error("ERR Invalid SET command expiration".to_string()).encode()
+            }
+            CommandError::InvalidRPushCommand => {
+                RespValue::Error("ERR Invalid RPUSH command".to_string()).encode()
+            }
+            CommandError::DataNotFound => {
+                RespValue::Error("ERR Data not found".to_string()).encode()
+            }
+            CommandError::InvalidLRangeCommand => {
+                RespValue::Error("ERR Invalid LRANGE command".to_string()).encode()
+            }
+            CommandError::InvalidLRangeCommandArgument => {
+                RespValue::Error("ERR Invalid LRANGE command argument".to_string()).encode()
+            }
+            CommandError::InvalidLPushCommand => {
+                RespValue::Error("ERR Invalid LPUSH command".to_string()).encode()
+            }
+            CommandError::InvalidLLenCommand => {
+                RespValue::Error("ERR Invalid LLEN command".to_string()).encode()
+            }
+            CommandError::InvalidLPopCommand => {
+                RespValue::Error("ERR Invalid LPOP command".to_string()).encode()
+            }
+            CommandError::InvalidLPopCommandArgument => {
+                RespValue::Error("ERR Invalid LPOP command argument".to_string()).encode()
+            }
+            CommandError::InvalidBLPopCommand => {
+                RespValue::Error("ERR Invalid BLPOP command".to_string()).encode()
+            }
+            CommandError::InvalidBLPopCommandArgument => {
+                RespValue::Error("ERR Invalid BLPOP command argument".to_string()).encode()
+            }
+            CommandError::InvalidTypeCommand => {
+                RespValue::Error("ERR Invalid TYPE command".to_string()).encode()
+            }
+            CommandError::InvalidXAddCommand => {
+                RespValue::Error("ERR Invalid XADD command".to_string()).encode()
+            }
+            CommandError::InvalidXAddStreamId(str) => {
+                RespValue::Error(format!("ERR {}", str)).encode()
+            }
+            CommandError::InvalidDataTypeForKey => {
+                RespValue::Error("ERR Invalid data type for key".to_string()).encode()
+            }
         }
     }
 }
@@ -433,10 +477,17 @@ pub async fn handle_command(
                 return Err(CommandError::InvalidXAddCommand);
             }
 
-            if command.args[1].as_str().split("-").count() != 2 {
-                return Err(CommandError::InvalidXAddStreamId);
-            }
-
+            let store_key = command.args[0].clone();
+            let validated_stream_id =
+                validate_stream_id(store, &store_key, command.args[1].as_str())
+                    .await
+                    .map_err(|e| {
+                        if e == "Invalid data type for key" {
+                            CommandError::InvalidDataTypeForKey
+                        } else {
+                            CommandError::InvalidXAddStreamId(e)
+                        }
+                    })?;
             let key_value_pairs = command.args[2..].to_vec();
 
             let mut entries = HashMap::new();
@@ -452,27 +503,28 @@ pub async fn handle_command(
                 }
             }
 
-            let key = command.args[0].clone();
-            let stream_id = command.args[1].clone();
             let mut store_guard = store.lock().await;
 
-            if let Some(value) = store_guard.get_mut(&key) {
+            if let Some(value) = store_guard.get_mut(&store_key) {
                 if let DataType::Stream(ref mut stream) = value.data {
-                    stream.insert(stream_id, entries);
+                    stream.insert(validated_stream_id.clone(), entries);
                 } else {
-                    return Err(CommandError::DataNotFound);
+                    return Err(CommandError::InvalidDataTypeForKey);
                 }
             } else {
                 store_guard.insert(
-                    key,
+                    store_key,
                     Value {
-                        data: DataType::Stream(HashMap::from([(stream_id, entries)])),
+                        data: DataType::Stream(BTreeMap::from([(
+                            validated_stream_id.clone(),
+                            entries,
+                        )])),
                         expiration: None,
                     },
                 );
             }
 
-            Ok(RespValue::BulkString(command.args[1].clone()).encode())
+            Ok(RespValue::BulkString(validated_stream_id).encode())
         }
         _ => {
             return Err(CommandError::InvalidCommand);
@@ -480,39 +532,7 @@ pub async fn handle_command(
     }
 }
 
-pub fn validate_range_indexes(
-    list: &VecDeque<String>,
-    start_index: isize,
-    end_index: isize,
-) -> Result<(usize, usize), &str> {
-    let len = list.len() as isize;
-
-    let mut start = if start_index < 0 {
-        len + start_index
-    } else {
-        start_index
-    };
-    let mut end = if end_index < 0 {
-        len + end_index
-    } else {
-        end_index
-    };
-
-    start = start.max(0);
-    end = end.min(len - 1);
-
-    if start >= len {
-        return Err("Start index is out of bounds");
-    }
-
-    if start > end {
-        return Err("Start index is bigger than end index after processing");
-    }
-
-    Ok((start as usize, end as usize))
-}
-
-pub async fn push_array_operations(
+async fn push_array_operations(
     command: &Command,
     store: &mut Arc<Mutex<KeyValueStore>>,
     state: &mut Arc<Mutex<State>>,
