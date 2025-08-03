@@ -1,0 +1,122 @@
+use thiserror::Error;
+
+use crate::resp::RespValue;
+
+#[derive(Error, Debug, PartialEq)]
+pub enum CommandError {
+    #[error("invalid command")]
+    InvalidCommand,
+    #[error("invalid command argument")]
+    InvalidCommandArgument,
+    #[error("invalid ECHO command")]
+    InvalidEchoCommand,
+    #[error("invalid GET command")]
+    InvalidGetCommand,
+    #[error("invalid SET command")]
+    InvalidSetCommand,
+    #[error("invalid SET command argument")]
+    InvalidSetCommandArgument,
+    #[error("invalid SET command expiration")]
+    InvalidSetCommandExpiration,
+    #[error("invalid RPUSH command")]
+    InvalidRPushCommand,
+    #[error("data not found")]
+    DataNotFound,
+    #[error("invalid LRANGE command")]
+    InvalidLRangeCommand,
+    #[error("invalid LRANGE command argument")]
+    InvalidLRangeCommandArgument,
+    #[error("invalid LPUSH command")]
+    InvalidLPushCommand,
+    #[error("invalid LLEN command")]
+    InvalidLLenCommand,
+    #[error("invalid LPOP command")]
+    InvalidLPopCommand,
+    #[error("invalid LPOP command argument")]
+    InvalidLPopCommandArgument,
+    #[error("invalid BLPOP command")]
+    InvalidBLPopCommand,
+    #[error("invalid BLPOP command argument")]
+    InvalidBLPopCommandArgument,
+    #[error("invalid TYPE command")]
+    InvalidTypeCommand,
+    #[error("invalid XADD command")]
+    InvalidXAddCommand,
+    #[error("{0}")]
+    InvalidStreamId(String),
+    #[error("invalid data type for key")]
+    InvalidDataTypeForKey,
+    #[error("invalid XRANGE command")]
+    InvalidXRangeCommand,
+}
+
+impl CommandError {
+    pub fn as_string(&self) -> String {
+        match self {
+            CommandError::InvalidCommand => {
+                RespValue::Error("ERR Invalid command".to_string()).encode()
+            }
+            CommandError::InvalidCommandArgument => {
+                RespValue::Error("ERR Invalid command argument".to_string()).encode()
+            }
+            CommandError::InvalidEchoCommand => {
+                RespValue::Error("ERR Invalid ECHO command".to_string()).encode()
+            }
+            CommandError::InvalidGetCommand => {
+                RespValue::Error("ERR Invalid GET command".to_string()).encode()
+            }
+            CommandError::InvalidSetCommand => {
+                RespValue::Error("ERR Invalid SET command".to_string()).encode()
+            }
+            CommandError::InvalidSetCommandArgument => {
+                RespValue::Error("ERR Invalid SET command argument".to_string()).encode()
+            }
+            CommandError::InvalidSetCommandExpiration => {
+                RespValue::Error("ERR Invalid SET command expiration".to_string()).encode()
+            }
+            CommandError::InvalidRPushCommand => {
+                RespValue::Error("ERR Invalid RPUSH command".to_string()).encode()
+            }
+            CommandError::DataNotFound => {
+                RespValue::Error("ERR Data not found".to_string()).encode()
+            }
+            CommandError::InvalidLRangeCommand => {
+                RespValue::Error("ERR Invalid LRANGE command".to_string()).encode()
+            }
+            CommandError::InvalidLRangeCommandArgument => {
+                RespValue::Error("ERR Invalid LRANGE command argument".to_string()).encode()
+            }
+            CommandError::InvalidLPushCommand => {
+                RespValue::Error("ERR Invalid LPUSH command".to_string()).encode()
+            }
+            CommandError::InvalidLLenCommand => {
+                RespValue::Error("ERR Invalid LLEN command".to_string()).encode()
+            }
+            CommandError::InvalidLPopCommand => {
+                RespValue::Error("ERR Invalid LPOP command".to_string()).encode()
+            }
+            CommandError::InvalidLPopCommandArgument => {
+                RespValue::Error("ERR Invalid LPOP command argument".to_string()).encode()
+            }
+            CommandError::InvalidBLPopCommand => {
+                RespValue::Error("ERR Invalid BLPOP command".to_string()).encode()
+            }
+            CommandError::InvalidBLPopCommandArgument => {
+                RespValue::Error("ERR Invalid BLPOP command argument".to_string()).encode()
+            }
+            CommandError::InvalidTypeCommand => {
+                RespValue::Error("ERR Invalid TYPE command".to_string()).encode()
+            }
+            CommandError::InvalidXAddCommand => {
+                RespValue::Error("ERR Invalid XADD command".to_string()).encode()
+            }
+            CommandError::InvalidStreamId(str) => RespValue::Error(format!("ERR {}", str)).encode(),
+            CommandError::InvalidDataTypeForKey => {
+                RespValue::Error("ERR Invalid data type for key".to_string()).encode()
+            }
+            CommandError::InvalidXRangeCommand => {
+                RespValue::Error("ERR Invalid XRANGE command".to_string()).encode()
+            }
+        }
+    }
+}

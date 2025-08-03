@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use tokio::time::Instant;
 
-pub type Stream = HashMap<String, String>;
+pub type Stream = BTreeMap<String, String>;
 
 #[derive(Debug, PartialEq)]
 pub enum DataType {

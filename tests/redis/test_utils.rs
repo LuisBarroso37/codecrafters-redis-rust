@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use codecrafters_redis::{
-    command::{CommandError, handle_command},
+    commands::{CommandError, CommandProcessor},
     key_value_store::KeyValueStore,
     resp::RespValue,
     state::State,
@@ -44,14 +44,12 @@ impl TestEnv {
         &mut self,
         command: Vec<RespValue>,
         server_addr: &str,
-    ) -> Result<String, codecrafters_redis::command::CommandError> {
-        handle_command(
-            server_addr.to_string(),
-            command,
-            &mut self.store,
-            &mut self.state,
-        )
-        .await
+    ) -> Result<String, codecrafters_redis::commands::CommandError> {
+        let command_processor = CommandProcessor::new(command)?;
+
+        command_processor
+            .handle_command(server_addr.to_string(), &mut self.store, &mut self.state)
+            .await
     }
 
     /// Execute a command and assert it succeeds with expected result
@@ -211,6 +209,7 @@ impl TestUtils {
         ])]
     }
 
+    /// Create a XADD command
     pub fn xadd_command(key: &str, stream_id: &str, entries: &[&str]) -> Vec<RespValue> {
         let mut vec = vec![
             RespValue::BulkString("XADD".to_string()),
@@ -223,6 +222,16 @@ impl TestUtils {
         }
 
         vec![RespValue::Array(vec)]
+    }
+
+    /// Create a XRANGE command
+    pub fn xrange_command(key: &str, start_stream_id: &str, end_stream_id: &str) -> Vec<RespValue> {
+        vec![RespValue::Array(vec![
+            RespValue::BulkString("XRANGE".to_string()),
+            RespValue::BulkString(key.to_string()),
+            RespValue::BulkString(start_stream_id.to_string()),
+            RespValue::BulkString(end_stream_id.to_string()),
+        ])]
     }
 
     /// Create an invalid command
@@ -247,27 +256,29 @@ impl TestUtils {
         key: &str,
         timeout: &str,
         server_addr: &str,
-    ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::command::CommandError>> {
+    ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
         let (store_clone, state_clone) = env.clone_env();
         let blpop_command = Self::blpop_command(key, timeout);
         let server_addr = server_addr.to_string();
 
         tokio::spawn(async move {
-            handle_command(
-                server_addr,
-                blpop_command,
-                &mut store_clone.clone(),
-                &mut state_clone.clone(),
-            )
-            .await
+            let command_processor = CommandProcessor::new(blpop_command)?;
+
+            command_processor
+                .handle_command(
+                    server_addr,
+                    &mut store_clone.clone(),
+                    &mut state_clone.clone(),
+                )
+                .await
         })
     }
 
     /// Wait for a task with timeout and expect it to complete (success or failure)
     pub async fn wait_for_completion(
-        task: tokio::task::JoinHandle<Result<String, codecrafters_redis::command::CommandError>>,
+        task: tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>>,
         timeout_duration: Duration,
-    ) -> Result<String, codecrafters_redis::command::CommandError> {
+    ) -> Result<String, codecrafters_redis::commands::CommandError> {
         timeout(timeout_duration, task)
             .await
             .expect("Task should complete within timeout")
@@ -310,7 +321,7 @@ impl TestUtils {
 
     /// Filter successful results containing a specific substring
     pub fn filter_successful_results_containing<'a>(
-        results: &'a [Result<String, codecrafters_redis::command::CommandError>],
+        results: &'a [Result<String, codecrafters_redis::commands::CommandError>],
         substring: &str,
     ) -> Vec<&'a String> {
         results

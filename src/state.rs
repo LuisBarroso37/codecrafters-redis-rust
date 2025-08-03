@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 #[derive(Debug)]
 pub struct Subscriber {
-    pub server_addr: String,
+    pub server_address: String,
     pub sender: oneshot::Sender<bool>,
 }
 
@@ -35,10 +35,10 @@ impl State {
         }
     }
 
-    pub fn remove_subscriber(&mut self, command: &str, arg: &str, server_addr: &str) {
+    pub fn remove_subscriber(&mut self, command: &str, arg: &str, server_address: &str) {
         if let Some(args) = self.subscribers.get_mut(command) {
             if let Some(subscriber_vec) = args.get_mut(arg) {
-                subscriber_vec.retain(|subscriber| subscriber.server_addr != server_addr);
+                subscriber_vec.retain(|subscriber| subscriber.server_address != server_address);
             }
         }
     }

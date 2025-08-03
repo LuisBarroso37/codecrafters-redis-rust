@@ -1,8 +1,27 @@
 use std::{collections::HashMap, time::Duration};
 
-use codecrafters_redis::command::CommandError;
+use codecrafters_redis::commands::CommandError;
 
 use crate::test_utils::{TestEnv, TestUtils};
+
+#[tokio::test]
+async fn test_handle_blpop_command_direct_response() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_integer(3),
+    )
+    .await;
+
+    env.exec_command_ok(
+        TestUtils::blpop_command("grape", "0"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_array(&["grape", "mango"]),
+    )
+    .await;
+}
 
 #[tokio::test]
 async fn test_blpop_concurrent_clients_simple_blocking() {

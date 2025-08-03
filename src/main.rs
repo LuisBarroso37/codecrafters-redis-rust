@@ -7,12 +7,11 @@ use tokio::{
 };
 
 use crate::{
-    command::handle_command, input::parse_input, key_value_store::KeyValueStore, resp::RespValue,
-    state::State,
+    commands::CommandProcessor, input::parse_input, key_value_store::KeyValueStore,
+    resp::RespValue, state::State,
 };
 
-mod command;
-mod command_utils;
+mod commands;
 mod input;
 mod key_value_store;
 mod resp;
@@ -59,15 +58,24 @@ async fn main() {
                             }
                         };
 
-                        let server_addr = match stream.peer_addr() {
-                            Ok(addr) => addr.to_string(),
+                        let server_address = match stream.peer_addr() {
+                            Ok(address) => address.to_string(),
                             Err(_) => {
                                 let _ = stream.write_all(b"ERR failed to get server address").await;
                                 continue;
                             }
                         };
 
-                        match handle_command(server_addr, parsed_command, &mut store, &mut state)
+                        let command_processor = match CommandProcessor::new(parsed_command) {
+                            Ok(cmd) => cmd,
+                            Err(e) => {
+                                let _ = stream.write_all(e.as_string().as_bytes()).await;
+                                continue;
+                            }
+                        };
+
+                        match command_processor
+                            .handle_command(server_address, &mut store, &mut state)
                             .await
                         {
                             Ok(resp) => {
