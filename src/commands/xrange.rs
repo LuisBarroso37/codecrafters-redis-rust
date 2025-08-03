@@ -24,8 +24,21 @@ pub async fn xrange(
             _ => return Err(CommandError::InvalidDataTypeForKey),
         };
 
-        let start_stream_id =
-            validate_stream_id(&arguments[1]).map_err(|e| CommandError::InvalidStreamId(e))?;
+        let start_stream_id = match arguments[1].as_str() {
+            "-" => {
+                let first_key_value_pair = stream.first_key_value();
+
+                match first_key_value_pair {
+                    Some((stream_id, _)) => validate_stream_id(stream_id)
+                        .map_err(|e| CommandError::InvalidStreamId(e))?,
+                    None => return Ok(RespValue::Array(Vec::with_capacity(0)).encode()),
+                }
+            }
+            argument => {
+                validate_stream_id(argument).map_err(|e| CommandError::InvalidStreamId(e))?
+            }
+        };
+
         let end_stream_id =
             validate_stream_id(&arguments[2]).map_err(|e| CommandError::InvalidStreamId(e))?;
 

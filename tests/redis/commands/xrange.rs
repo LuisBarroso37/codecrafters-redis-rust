@@ -59,6 +59,12 @@ async fn test_handle_xrange_command() {
             "1526919030414-2",
             "*3\r\n*2\r\n$15\r\n1526919030414-0\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
         ),
+        (
+            "-",
+            "1526919030414-2",
+            "*7\r\n*2\r\n$15\r\n1526919030404-0\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030404-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030404-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030404-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-0\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
+        ),
+        ("1526919030424-0", "1526919030424-2", "*0\r\n"),
     ];
 
     for (start_stream_id, end_stream_id, expected_response) in test_cases {
@@ -69,4 +75,31 @@ async fn test_handle_xrange_command() {
         )
         .await;
     }
+}
+
+#[tokio::test]
+async fn test_handle_xrange_command_data_not_found() {
+    let mut env = TestEnv::new();
+
+    for i in 0..=1 {
+        let stream_id = format!("1526919030404-{}", i);
+
+        env.exec_command_ok(
+            TestUtils::xadd_command(
+                "fruits",
+                &stream_id,
+                &["mango", "apple", "raspberry", "pear"],
+            ),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_bulk_string(&stream_id),
+        )
+        .await;
+    }
+
+    env.exec_command_ok(
+        TestUtils::xrange_command("fruits", "1526919030424-0", "1526919030424-2"),
+        &TestUtils::server_addr(41844),
+        "*0\r\n",
+    )
+    .await;
 }
