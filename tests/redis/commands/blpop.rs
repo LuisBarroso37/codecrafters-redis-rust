@@ -338,3 +338,24 @@ async fn test_blpop_concurrent_different_keys() {
         assert!(response.contains("value_"));
     }
 }
+
+#[tokio::test]
+async fn test_handle_blpop_command_invalid() {
+    let mut env = TestEnv::new();
+
+    let test_cases = vec![
+        (
+            TestUtils::invalid_command(&["BLPOP"]),
+            CommandError::InvalidBLPopCommand,
+        ),
+        (
+            TestUtils::invalid_command(&["BLPOP", "grape", "2", "mango"]),
+            CommandError::InvalidBLPopCommand,
+        ),
+    ];
+
+    for (command, expected_error) in test_cases {
+        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+            .await;
+    }
+}

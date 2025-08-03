@@ -1,3 +1,5 @@
+use codecrafters_redis::commands::CommandError;
+
 use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
@@ -32,6 +34,27 @@ async fn test_handle_lrange_command() {
 
     for (command, expected_response) in test_cases {
         env.exec_command_ok(command, &TestUtils::server_addr(41844), expected_response)
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn test_handle_lrange_command_invalid() {
+    let mut env = TestEnv::new();
+
+    let test_cases = vec![
+        (
+            TestUtils::invalid_command(&["LRANGE", "grape", "0"]),
+            CommandError::InvalidLRangeCommand,
+        ),
+        (
+            TestUtils::invalid_command(&["LRANGE", "grape", "0", "1", "mango"]),
+            CommandError::InvalidLRangeCommand,
+        ),
+    ];
+
+    for (command, expected_error) in test_cases {
+        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
             .await;
     }
 }

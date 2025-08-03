@@ -87,13 +87,6 @@ async fn test_handle_get_command_with_expiration() {
 async fn test_handle_get_command_invalid() {
     let mut env = TestEnv::new();
 
-    env.exec_command_ok(
-        TestUtils::set_command_with_expiration("grape", "mango", 100),
-        &TestUtils::server_addr(41844),
-        &TestUtils::expected_simple_string("OK"),
-    )
-    .await;
-
     let test_cases = vec![
         (
             TestUtils::invalid_command(&["GET"]),

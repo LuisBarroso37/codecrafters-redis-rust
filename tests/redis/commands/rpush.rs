@@ -87,7 +87,7 @@ async fn test_handle_rpush_command_invalid() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::invalid_command(&["RPUSH"]),
+        TestUtils::invalid_command(&["RPUSH", "mango"]),
         &TestUtils::server_addr(41844),
         CommandError::InvalidRPushCommand,
     )

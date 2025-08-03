@@ -8,6 +8,8 @@ pub enum CommandError {
     InvalidCommand,
     #[error("invalid command argument")]
     InvalidCommandArgument,
+    #[error("invalid PING command")]
+    InvalidPingCommand,
     #[error("invalid ECHO command")]
     InvalidEchoCommand,
     #[error("invalid GET command")]
@@ -48,6 +50,10 @@ pub enum CommandError {
     InvalidDataTypeForKey,
     #[error("invalid XRANGE command")]
     InvalidXRangeCommand,
+    #[error("invalid XREAD command")]
+    InvalidXReadCommand,
+    #[error("invalid XREAD command option")]
+    InvalidXReadOption,
 }
 
 impl CommandError {
@@ -58,6 +64,9 @@ impl CommandError {
             }
             CommandError::InvalidCommandArgument => {
                 RespValue::Error("ERR Invalid command argument".to_string()).encode()
+            }
+            CommandError::InvalidPingCommand => {
+                RespValue::Error("ERR Invalid PING command".to_string()).encode()
             }
             CommandError::InvalidEchoCommand => {
                 RespValue::Error("ERR Invalid ECHO command".to_string()).encode()
@@ -115,6 +124,12 @@ impl CommandError {
                 RespValue::Error("ERR Invalid data type for key".to_string()).encode()
             }
             CommandError::InvalidXRangeCommand => {
+                RespValue::Error("ERR Invalid XRANGE command".to_string()).encode()
+            }
+            CommandError::InvalidXReadOption => {
+                RespValue::Error("ERR Invalid XRANGE command option".to_string()).encode()
+            }
+            CommandError::InvalidXReadCommand => {
                 RespValue::Error("ERR Invalid XRANGE command".to_string()).encode()
             }
         }

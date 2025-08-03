@@ -77,10 +77,19 @@ async fn test_handle_type_command_missing_key() {
 async fn test_handle_type_command_invalid() {
     let mut env = TestEnv::new();
 
-    env.exec_command_err(
-        TestUtils::invalid_command(&["TYPE"]),
-        &TestUtils::server_addr(41844),
-        CommandError::InvalidTypeCommand,
-    )
-    .await;
+    let test_cases = vec![
+        (
+            TestUtils::invalid_command(&["TYPE"]),
+            CommandError::InvalidTypeCommand,
+        ),
+        (
+            TestUtils::invalid_command(&["TYPE", "grape", "mango"]),
+            CommandError::InvalidTypeCommand,
+        ),
+    ];
+
+    for (command, expected_error) in test_cases {
+        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+            .await;
+    }
 }

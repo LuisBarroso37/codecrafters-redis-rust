@@ -1,3 +1,5 @@
+use codecrafters_redis::commands::CommandError;
+
 use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
@@ -112,4 +114,89 @@ async fn test_handle_xrange_command_data_not_found() {
         "*0\r\n",
     )
     .await;
+}
+
+#[tokio::test]
+async fn test_handle_xrange_command_invalid_data_type() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::set_command("fruit", "mango"),
+        &TestUtils::server_addr(41844),
+        &&TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    env.exec_command_err(
+        TestUtils::xrange_command("fruit", "1526919030424-0", "1526919030424-2"),
+        &TestUtils::server_addr(41844),
+        CommandError::InvalidDataTypeForKey,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_xrange_command_zero_zero_forbidden() {
+    let mut env = TestEnv::new();
+
+    for i in 0..=1 {
+        let stream_id = format!("1526919030404-{}", i);
+
+        env.exec_command_ok(
+            TestUtils::xadd_command(
+                "fruits",
+                &stream_id,
+                &["mango", "apple", "raspberry", "pear"],
+            ),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_bulk_string(&stream_id),
+        )
+        .await;
+    }
+
+    env.exec_command_err(
+        TestUtils::xrange_command("fruits", "0-0", "0-2"),
+        &TestUtils::server_addr(41844),
+        CommandError::InvalidStreamId("The stream id must be greater than 0-0".to_string()),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_xrange_command_key_not_found() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_err(
+        TestUtils::xrange_command("fruits", "1526919030424-0", "1526919030424-2"),
+        &TestUtils::server_addr(41844),
+        CommandError::DataNotFound,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_handle_xrange_command_invalid() {
+    let mut env = TestEnv::new();
+
+    let test_cases = vec![
+        (
+            TestUtils::invalid_command(&["XRANGE", "grape", "1526919030424-0"]),
+            CommandError::InvalidXRangeCommand,
+        ),
+        (
+            TestUtils::invalid_command(&[
+                "XRANGE",
+                "grape",
+                "1526919030424-0",
+                "1526919030424-1",
+                "mango",
+            ]),
+            CommandError::InvalidXRangeCommand,
+        ),
+    ];
+
+    for (command, expected_error) in test_cases {
+        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+            .await;
+    }
 }

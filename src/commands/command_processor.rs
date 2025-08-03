@@ -11,11 +11,13 @@ use crate::{
         llen::llen,
         lpop::lpop,
         lrange::lrange,
+        ping::ping,
         rpush_and_lpush::{lpush, rpush},
         set::set,
         type_command::type_command,
         xadd::xadd,
         xrange::xrange,
+        xread::xread,
     },
     key_value_store::KeyValueStore,
     resp::RespValue,
@@ -65,7 +67,7 @@ impl CommandProcessor {
         state: &mut Arc<Mutex<State>>,
     ) -> Result<String, CommandError> {
         match self.name.as_str() {
-            "PING" => Ok(RespValue::SimpleString("PONG".to_string()).encode()),
+            "PING" => ping(self.arguments.clone()),
             "ECHO" => echo(self.arguments.clone()),
             "GET" => get(store, self.arguments.clone()).await,
             "SET" => set(store, self.arguments.clone()).await,
@@ -78,6 +80,7 @@ impl CommandProcessor {
             "TYPE" => type_command(store, self.arguments.clone()).await,
             "XADD" => xadd(store, self.arguments.clone()).await,
             "XRANGE" => xrange(store, self.arguments.clone()).await,
+            "XREAD" => xread(store, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

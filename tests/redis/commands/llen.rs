@@ -56,10 +56,19 @@ async fn test_handle_llen_command_wrong_data_type() {
 async fn test_handle_llen_command_invalid() {
     let mut env = TestEnv::new();
 
-    env.exec_command_err(
-        TestUtils::invalid_command(&["LLEN"]),
-        &TestUtils::server_addr(41844),
-        CommandError::InvalidLLenCommand,
-    )
-    .await;
+    let test_cases = vec![
+        (
+            TestUtils::invalid_command(&["LLEN"]),
+            CommandError::InvalidLLenCommand,
+        ),
+        (
+            TestUtils::invalid_command(&["LLEN", "grape", "mango"]),
+            CommandError::InvalidLLenCommand,
+        ),
+    ];
+
+    for (command, expected_error) in test_cases {
+        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+            .await;
+    }
 }

@@ -234,6 +234,16 @@ impl TestUtils {
         ])]
     }
 
+    /// Create a XREAD command
+    pub fn xread_command(key: &str, start_stream_id: &str) -> Vec<RespValue> {
+        vec![RespValue::Array(vec![
+            RespValue::BulkString("XREAD".to_string()),
+            RespValue::BulkString("STREAMS".to_string()),
+            RespValue::BulkString(key.to_string()),
+            RespValue::BulkString(start_stream_id.to_string()),
+        ])]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();
