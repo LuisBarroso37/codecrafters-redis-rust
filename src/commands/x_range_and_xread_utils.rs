@@ -54,7 +54,7 @@ pub fn parse_stream_entries_to_resp(
             stream_vec.push(RespValue::Array(stream_values_vec));
             return stream_vec;
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<Vec<RespValue>>>();
 
     for resp_vector in resp_stream_data {
         response.push(RespValue::Array(resp_vector));

@@ -235,13 +235,21 @@ impl TestUtils {
     }
 
     /// Create a XREAD command
-    pub fn xread_command(key: &str, start_stream_id: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn xread_command(keys: &[&str], start_stream_ids: &[&str]) -> Vec<RespValue> {
+        let mut vec = vec![
             RespValue::BulkString("XREAD".to_string()),
             RespValue::BulkString("STREAMS".to_string()),
-            RespValue::BulkString(key.to_string()),
-            RespValue::BulkString(start_stream_id.to_string()),
-        ])]
+        ];
+
+        for key in keys {
+            vec.push(RespValue::BulkString(key.to_string()));
+        }
+
+        for stream_id in start_stream_ids {
+            vec.push(RespValue::BulkString(stream_id.to_string()));
+        }
+
+        vec![RespValue::Array(vec)]
     }
 
     /// Create an invalid command

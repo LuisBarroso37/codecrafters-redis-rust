@@ -6,7 +6,7 @@ use crate::{
         command_error::CommandError,
         x_range_and_xread_utils::{parse_stream_entries_to_resp, validate_stream_id},
     },
-    key_value_store::{DataType, KeyValueStore},
+    key_value_store::{DataType, KeyValueStore, Stream},
     resp::RespValue,
 };
 
@@ -67,7 +67,7 @@ pub async fn xrange(
                     None
                 }
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<(&String, &Stream)>>();
 
         let resp_value = parse_stream_entries_to_resp(entries);
         return Ok(resp_value.encode());

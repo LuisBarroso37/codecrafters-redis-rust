@@ -6,40 +6,58 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_xread_command() {
     let mut env = TestEnv::new();
 
-    for i in 0..=1 {
-        let first_stream_id_part = format!("15269190304{}4", i);
+    for key in vec!["fruits", "exotic fruits"] {
+        for i in 0..=1 {
+            let first_stream_id_part = format!("15269190304{}4", i);
 
-        for j in 0..=3 {
-            let stream_id = format!("{}-{}", &first_stream_id_part, j);
+            for j in 0..=3 {
+                let stream_id = format!("{}-{}", &first_stream_id_part, j);
 
-            env.exec_command_ok(
-                TestUtils::xadd_command(
-                    "fruits",
-                    &stream_id,
-                    &["mango", "apple", "raspberry", "pear"],
-                ),
-                &TestUtils::server_addr(41844),
-                &TestUtils::expected_bulk_string(&stream_id),
-            )
-            .await;
+                env.exec_command_ok(
+                    TestUtils::xadd_command(
+                        key,
+                        &stream_id,
+                        &["mango", "apple", "raspberry", "pear"],
+                    ),
+                    &TestUtils::server_addr(41844),
+                    &TestUtils::expected_bulk_string(&stream_id),
+                )
+                .await;
+            }
         }
     }
 
-    let test_cases = vec![
+    let test_cases: Vec<(&[&str], &[&str], &'static str)> = vec![
         (
-            "1526919030404-1",
+            &["fruits"],
+            &["1526919030404-1"],
             "*1\r\n*2\r\n$6\r\nfruits\r\n*6\r\n*2\r\n$15\r\n1526919030404-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030404-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-0\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
         ),
         (
-            "1526919030414-2",
+            &["fruits"],
+            &["1526919030414-2"],
             "*1\r\n*2\r\n$6\r\nfruits\r\n*1\r\n*2\r\n$15\r\n1526919030414-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
         ),
-        ("1526919030414-3", "*1\r\n*2\r\n$6\r\nfruits\r\n*0\r\n"),
+        (
+            &["fruits"],
+            &["1526919030414-3"],
+            "*1\r\n*2\r\n$6\r\nfruits\r\n*0\r\n",
+        ),
+        (
+            &["fruits", "exotic fruits"],
+            &["1526919030414-1", "1526919030414-2"],
+            "*2\r\n*2\r\n$6\r\nfruits\r\n*2\r\n*2\r\n$15\r\n1526919030414-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$13\r\nexotic fruits\r\n*1\r\n*2\r\n$15\r\n1526919030414-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
+        ),
+        (
+            &["fruits", "exotic fruits"],
+            &["1526919030414-1", "1526919030414-3"],
+            "*2\r\n*2\r\n$6\r\nfruits\r\n*2\r\n*2\r\n$15\r\n1526919030414-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$15\r\n1526919030414-3\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$13\r\nexotic fruits\r\n*0\r\n",
+        ),
     ];
 
-    for (start_stream_id, expected_response) in test_cases {
+    for (keys, start_stream_ids, expected_response) in test_cases {
         env.exec_command_ok(
-            TestUtils::xread_command("fruits", start_stream_id),
+            TestUtils::xread_command(keys, start_stream_ids),
             &TestUtils::server_addr(41844),
             expected_response,
         )
@@ -67,7 +85,7 @@ async fn test_handle_xread_command_zero_zero_allowed() {
     }
 
     env.exec_command_ok(
-        TestUtils::xread_command("fruits", "0-0"),
+        TestUtils::xread_command(&["fruits"], &["0-0"]),
         &TestUtils::server_addr(41844),
         "*1\r\n*2\r\n$6\r\nfruits\r\n*2\r\n*2\r\n$3\r\n0-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$3\r\n0-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
     )
@@ -94,7 +112,7 @@ async fn test_handle_xread_command_data_not_found() {
     }
 
     env.exec_command_ok(
-        TestUtils::xread_command("fruits", "1526919030424-0"),
+        TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
         &TestUtils::server_addr(41844),
         "*1\r\n*2\r\n$6\r\nfruits\r\n*0\r\n",
     )
@@ -113,7 +131,7 @@ async fn test_handle_xread_command_invalid_data_type() {
     .await;
 
     env.exec_command_err(
-        TestUtils::xread_command("fruit", "1526919030424-0"),
+        TestUtils::xread_command(&["fruit"], &["1526919030424-0"]),
         &TestUtils::server_addr(41844),
         CommandError::InvalidDataTypeForKey,
     )
@@ -125,7 +143,7 @@ async fn test_handle_xread_command_key_not_found() {
     let mut env = TestEnv::new();
 
     env.exec_command_err(
-        TestUtils::xread_command("fruits", "1526919030424-0"),
+        TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
         &TestUtils::server_addr(41844),
         CommandError::DataNotFound,
     )
