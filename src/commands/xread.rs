@@ -1,5 +1,5 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::{
     commands::{
@@ -8,25 +8,49 @@ use crate::{
     },
     key_value_store::{DataType, KeyValueStore, Stream},
     resp::RespValue,
+    state::{State, Subscriber},
 };
 
 pub async fn xread(
+    server_address: String,
     store: &mut Arc<Mutex<KeyValueStore>>,
+    state: &mut Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     if arguments.len() < 3 {
         return Err(CommandError::InvalidXReadCommand);
     }
 
-    if arguments[0].to_lowercase() != "streams" {
-        return Err(CommandError::InvalidXReadOption);
-    }
+    let blocking_duration = match arguments[0].to_lowercase().as_str() {
+        "block" => {
+            let block_duration = arguments[1]
+                .parse::<u64>()
+                .map_err(|_| CommandError::InvalidXReadBlockDuration)?;
 
-    if arguments[1..].len() % 2 != 0 {
+            if arguments[2].to_lowercase() != "streams" {
+                return Err(CommandError::InvalidXReadOption);
+            }
+
+            Some(block_duration)
+        }
+        "streams" => None,
+        _ => {
+            return Err(CommandError::InvalidXReadOption);
+        }
+    };
+
+    let start_data_index = match blocking_duration {
+        Some(_) => 3,
+        None => 1,
+    };
+
+    let data = arguments[start_data_index..].to_vec();
+
+    if data.len() % 2 != 0 {
         return Err(CommandError::InvalidXReadCommand);
     }
 
-    let index = arguments
+    let index = data
         .iter()
         .position(|arg| {
             let split_argument = arg.split("-").collect::<Vec<&str>>();
@@ -40,19 +64,79 @@ pub async fn xread(
         })
         .ok_or_else(|| CommandError::InvalidXReadCommand)?;
 
-    let expected_index = f32::ceil(arguments.len() as f32 / 2 as f32) as usize;
-
-    if index != expected_index {
+    if index != (data.len() / 2) {
         return Err(CommandError::InvalidXReadCommand);
     }
 
     let mut key_stream_id_pairs: Vec<(String, String)> = Vec::new();
 
-    for i in 0..index - 1 {
-        println!("{} {}", &arguments[i + 1], &arguments[index + i]);
-        key_stream_id_pairs.push((arguments[i + 1].clone(), arguments[index + i].clone()));
+    for i in 0..index {
+        key_stream_id_pairs.push((data[i].clone(), data[index + i].clone()));
     }
 
+    if blocking_duration.is_none() {
+        return read_streams(store, key_stream_id_pairs).await;
+    } else {
+        let direct_call_response = read_streams(store, key_stream_id_pairs.clone()).await?;
+
+        if direct_call_response != RespValue::Array(vec![]).encode() {
+            return Ok(direct_call_response);
+        }
+    }
+
+    let (sender, mut receiver) = mpsc::channel(32);
+
+    for (key, _) in &key_stream_id_pairs {
+        let subscriber = Subscriber {
+            server_address: server_address.clone(),
+            sender: sender.clone(),
+        };
+
+        let mut state_guard = state.lock().await;
+        state_guard.add_subscriber("XREAD".to_string(), key.clone(), subscriber);
+    }
+
+    let result = match blocking_duration {
+        Some(0) => receiver.recv().await,
+        Some(num) => {
+            match tokio::time::timeout(Duration::from_millis(num), receiver.recv()).await {
+                Ok(result) => result,
+                Err(_) => {
+                    for (key, _) in &key_stream_id_pairs {
+                        let mut state_guard = state.lock().await;
+                        state_guard.remove_subscriber("XREAD", key.as_str(), &server_address);
+                        drop(state_guard);
+                    }
+
+                    return Ok(RespValue::Null.encode());
+                }
+            }
+        }
+        _ => {
+            return Err(CommandError::InvalidXReadCommand);
+        }
+    };
+
+    match result {
+        Some(_) => {
+            return read_streams(store, key_stream_id_pairs).await;
+        }
+        None => {
+            for (key, _) in &key_stream_id_pairs {
+                let mut state_guard = state.lock().await;
+                state_guard.remove_subscriber("XREAD", key.as_str(), &server_address);
+                drop(state_guard);
+            }
+
+            return Ok(RespValue::Null.encode());
+        }
+    }
+}
+
+async fn read_streams(
+    store: &mut Arc<Mutex<KeyValueStore>>,
+    key_stream_id_pairs: Vec<(String, String)>,
+) -> Result<String, CommandError> {
     let store_guard = store.lock().await;
 
     let mut resp = Vec::with_capacity(key_stream_id_pairs.len());
@@ -80,13 +164,13 @@ pub async fn xread(
                 })
                 .collect::<Vec<(&String, &Stream)>>();
 
-            let resp_stream = parse_stream_entries_to_resp(entries);
-            resp.push(RespValue::Array(vec![
-                RespValue::BulkString(key.clone()),
-                resp_stream,
-            ]));
-        } else {
-            return Err(CommandError::DataNotFound);
+            if entries.len() != 0 {
+                let resp_stream = parse_stream_entries_to_resp(entries);
+                resp.push(RespValue::Array(vec![
+                    RespValue::BulkString(key.clone()),
+                    resp_stream,
+                ]));
+            }
         }
     }
 

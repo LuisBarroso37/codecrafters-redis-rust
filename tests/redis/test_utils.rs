@@ -83,11 +83,11 @@ impl TestEnv {
 
 impl TestUtils {
     /// Create a BLPOP command
-    pub fn blpop_command(key: &str, timeout: &str) -> Vec<RespValue> {
+    pub fn blpop_command(key: &str, timeout_seconds: &str) -> Vec<RespValue> {
         vec![RespValue::Array(vec![
             RespValue::BulkString("BLPOP".to_string()),
             RespValue::BulkString(key.to_string()),
-            RespValue::BulkString(timeout.to_string()),
+            RespValue::BulkString(timeout_seconds.to_string()),
         ])]
     }
 
@@ -252,6 +252,30 @@ impl TestUtils {
         vec![RespValue::Array(vec)]
     }
 
+    /// Create a blocking XREAD command
+    pub fn xread_blocking_command(
+        timeout_milliseconds: &str,
+        keys: &[&str],
+        start_stream_ids: &[&str],
+    ) -> Vec<RespValue> {
+        let mut vec = vec![
+            RespValue::BulkString("XREAD".to_string()),
+            RespValue::BulkString("BLOCK".to_string()),
+            RespValue::BulkString(timeout_milliseconds.to_string()),
+            RespValue::BulkString("STREAMS".to_string()),
+        ];
+
+        for key in keys {
+            vec.push(RespValue::BulkString(key.to_string()));
+        }
+
+        for stream_id in start_stream_ids {
+            vec.push(RespValue::BulkString(stream_id.to_string()));
+        }
+
+        vec![RespValue::Array(vec)]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();
@@ -272,15 +296,41 @@ impl TestUtils {
     pub fn spawn_blpop_task(
         env: &TestEnv,
         key: &str,
-        timeout: &str,
+        timeout_seconds: &str,
         server_addr: &str,
     ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
         let (store_clone, state_clone) = env.clone_env();
-        let blpop_command = Self::blpop_command(key, timeout);
+        let blpop_command = Self::blpop_command(key, timeout_seconds);
         let server_addr = server_addr.to_string();
 
         tokio::spawn(async move {
             let command_processor = CommandProcessor::new(blpop_command)?;
+
+            command_processor
+                .handle_command(
+                    server_addr,
+                    &mut store_clone.clone(),
+                    &mut state_clone.clone(),
+                )
+                .await
+        })
+    }
+
+    /// Spawn a XREAD task that blocks on the given key
+    pub fn spawn_xread_task(
+        env: &TestEnv,
+        keys: &[&str],
+        stream_ids: &[&str],
+        timeout_milliseconds: &str,
+        server_addr: &str,
+    ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
+        let (store_clone, state_clone) = env.clone_env();
+        let xread_blocking_command =
+            Self::xread_blocking_command(timeout_milliseconds, keys, stream_ids);
+        let server_addr = server_addr.to_string();
+
+        tokio::spawn(async move {
+            let command_processor = CommandProcessor::new(xread_blocking_command)?;
 
             command_processor
                 .handle_command(

@@ -54,6 +54,8 @@ pub enum CommandError {
     InvalidXReadCommand,
     #[error("invalid XREAD command option")]
     InvalidXReadOption,
+    #[error("invalid XREAD block duration")]
+    InvalidXReadBlockDuration,
 }
 
 impl CommandError {
@@ -127,10 +129,13 @@ impl CommandError {
                 RespValue::Error("ERR Invalid XRANGE command".to_string()).encode()
             }
             CommandError::InvalidXReadOption => {
-                RespValue::Error("ERR Invalid XRANGE command option".to_string()).encode()
+                RespValue::Error("ERR Invalid XREAD command option".to_string()).encode()
             }
             CommandError::InvalidXReadCommand => {
-                RespValue::Error("ERR Invalid XRANGE command".to_string()).encode()
+                RespValue::Error("ERR Invalid XREAD command".to_string()).encode()
+            }
+            CommandError::InvalidXReadBlockDuration => {
+                RespValue::Error("ERR Invalid XREAD block duration".to_string()).encode()
             }
         }
     }

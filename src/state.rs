@@ -1,11 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Subscriber {
     pub server_address: String,
-    pub sender: oneshot::Sender<bool>,
+    pub sender: mpsc::Sender<bool>,
 }
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl State {
         if let Some(args) = self.subscribers.get_mut(command) {
             if let Some(subscriber_vec) = args.get_mut(arg) {
                 if let Some(subscriber) = subscriber_vec.pop_front() {
-                    let _ = subscriber.sender.send(message);
+                    let _ = subscriber.sender.try_send(message);
                 }
             }
         }

@@ -43,6 +43,7 @@ async fn push_array_operations(
     let mut was_empty_before = false;
 
     let mut store_guard = store.lock().await;
+
     store_guard
         .entry(arguments[0].clone())
         .and_modify(|v| {
@@ -86,7 +87,7 @@ async fn push_array_operations(
     }
 
     // Only notify subscribers if the list was empty before and now has elements
-    if was_empty_before && array_length > 0 {
+    if was_empty_before {
         let mut state_guard = state.lock().await;
         state_guard.send_to_subscriber("BLPOP", &arguments[0], true);
     }

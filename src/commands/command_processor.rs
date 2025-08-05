@@ -78,9 +78,9 @@ impl CommandProcessor {
             "LPOP" => lpop(store, self.arguments.clone()).await,
             "BLPOP" => blpop(server_address, store, state, self.arguments.clone()).await,
             "TYPE" => type_command(store, self.arguments.clone()).await,
-            "XADD" => xadd(store, self.arguments.clone()).await,
+            "XADD" => xadd(store, state, self.arguments.clone()).await,
             "XRANGE" => xrange(store, self.arguments.clone()).await,
-            "XREAD" => xread(store, self.arguments.clone()).await,
+            "XREAD" => xread(server_address, store, state, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

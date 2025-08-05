@@ -10,10 +10,12 @@ use crate::{
     commands::command_error::CommandError,
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
+    state::State,
 };
 
 pub async fn xadd(
     store: &mut Arc<Mutex<KeyValueStore>>,
+    state: &mut Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     if arguments.len() < 4 {
@@ -56,13 +58,16 @@ pub async fn xadd(
         }
     } else {
         store_guard.insert(
-            store_key,
+            store_key.clone(),
             Value {
                 data: DataType::Stream(BTreeMap::from([(validated_stream_id.clone(), entries)])),
                 expiration: None,
             },
         );
     }
+
+    let mut state_guard = state.lock().await;
+    state_guard.send_to_subscriber("XREAD", &store_key, true);
 
     Ok(RespValue::BulkString(validated_stream_id).encode())
 }

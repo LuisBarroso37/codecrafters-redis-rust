@@ -36,3 +36,9 @@ Note: This section is for stages 2 and beyond.
 ## Run codecrafters tests without pushing code to github
 
 codecrafters test
+
+## Run specific integration test with info logs
+
+```
+cargo test --test redis -- commands::xread::test_handle_xread_blocking_command_direct_response --nocapture
+```
