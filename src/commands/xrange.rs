@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use crate::{
     commands::{
         command_error::CommandError,
-        x_range_and_xread_utils::{parse_stream_entries_to_resp, validate_stream_id},
+        stream_utils::{parse_stream_entries_to_resp, validate_stream_id},
     },
     key_value_store::{DataType, KeyValueStore, Stream},
     resp::RespValue,

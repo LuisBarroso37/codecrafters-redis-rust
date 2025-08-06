@@ -67,7 +67,7 @@ pub async fn xadd(
     }
 
     let mut state_guard = state.lock().await;
-    state_guard.send_to_subscriber("XREAD", &store_key, true);
+    state_guard.send_to_xread_subscribers(&store_key, &validated_stream_id, true)?;
 
     Ok(RespValue::BulkString(validated_stream_id).encode())
 }

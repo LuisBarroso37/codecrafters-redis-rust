@@ -280,69 +280,6 @@ async fn test_xread_concurrent_clients_simple_blocking() {
 }
 
 #[tokio::test]
-async fn test_xread_concurrent_clients_first_come_first_served() {
-    let mut env = TestEnv::new();
-
-    let start_stream_id = "1526919030404-0";
-    let added_stream_id = "1526919030404-1";
-
-    // Multiple clients try to XREAD simultaneously
-    let mut tasks = vec![];
-
-    for i in 0..3 {
-        let client_addr = format!("127.0.0.1:1234{}", i + 1);
-
-        let task = TestUtils::spawn_xread_task(
-            &env,
-            &["fruits"],
-            &[start_stream_id],
-            "1000",
-            &client_addr,
-        );
-
-        tasks.push(task);
-    }
-
-    // Give clients time to register
-    TestUtils::sleep_ms(100).await;
-
-    // Push element to unblock first client
-    env.exec_command_ok(
-        TestUtils::xadd_command(
-            "fruits",
-            added_stream_id,
-            &["mango", "apple", "raspberry", "pear"],
-        ),
-        &TestUtils::server_addr(41844),
-        &TestUtils::expected_bulk_string(added_stream_id),
-    )
-    .await;
-
-    // Wait for all tasks to complete
-    let mut results = vec![];
-    for task in tasks {
-        let result = TestUtils::wait_for_completion(task, Duration::from_secs(2)).await;
-        results.push(result);
-    }
-
-    // Only one client should get the item, others should timeout
-    let successful_results =
-        TestUtils::filter_successful_results_containing(&results, added_stream_id);
-
-    assert_eq!(
-        successful_results.len(),
-        1,
-        "Only one client should get the item"
-    );
-
-    // The successful result should be properly formatted
-    assert_eq!(
-        successful_results[0],
-        "*1\r\n*2\r\n$6\r\nfruits\r\n*1\r\n*2\r\n$15\r\n1526919030404-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n"
-    );
-}
-
-#[tokio::test]
 async fn test_xread_blocking_timeout_behavior() {
     let mut env = TestEnv::new();
 
@@ -405,79 +342,7 @@ async fn test_xread_zero_timeout_infinite_wait() {
 }
 
 #[tokio::test]
-async fn test_xread_multiple_pushes_multiple_clients() {
-    let env = TestEnv::new();
-
-    let start_stream_id = "1526919030404-0";
-
-    // Start multiple XREAD clients
-    let mut xread_tasks = vec![];
-
-    for i in 0..3 {
-        let client_addr = format!("127.0.0.1:1236{}", i);
-
-        let task = TestUtils::spawn_xread_task(
-            &env,
-            &["fruits"],
-            &[start_stream_id],
-            "5000",
-            &client_addr,
-        );
-
-        xread_tasks.push(task);
-    }
-
-    // Give clients time to register
-    TestUtils::sleep_ms(100).await;
-
-    // Push multiple items in sequence
-    for i in 0..3 {
-        let mut env_mut = env.clone();
-        let client_addr = format!("127.0.0.1:1237{}", i);
-        let added_stream_id = format!("1526919030404-{}", i + 1);
-
-        env_mut
-            .exec_command_ok(
-                TestUtils::xadd_command(
-                    "fruits",
-                    &added_stream_id,
-                    &["mango", "apple", "raspberry", "pear"],
-                ),
-                &client_addr,
-                &TestUtils::expected_bulk_string(&added_stream_id),
-            )
-            .await;
-
-        // Small delay between pushes
-        TestUtils::sleep_ms(50).await;
-    }
-
-    // Collect all results
-    let mut results = vec![];
-    for task in xread_tasks {
-        let result = TestUtils::wait_for_completion(task, Duration::from_secs(1)).await;
-        results.push(result);
-    }
-
-    // All clients should get an item
-    let successful_results = TestUtils::filter_successful_results_containing(&results, "fruits");
-    assert_eq!(
-        successful_results.len(),
-        3,
-        "All clients should get an item"
-    );
-
-    // All clients should get their respective items
-    for (i, result) in results.iter().enumerate() {
-        assert!(result.is_ok());
-        let response = result.as_ref().unwrap();
-        assert!(response.contains("fruits"));
-        assert!(response.contains(format!("1526919030404-{}", i + 1).as_str()));
-    }
-}
-
-#[tokio::test]
-async fn test_xread_with_existing_items_concurrent() {
+async fn test_xread_concurrent_clients_direct_response() {
     let mut env = TestEnv::new();
 
     let start_stream_id = "1526919030404-0";
@@ -538,7 +403,7 @@ async fn test_xread_with_existing_items_concurrent() {
 }
 
 #[tokio::test]
-async fn test_xread_concurrent_different_keys() {
+async fn test_xread_concurrent_clients_different_keys() {
     let mut env = TestEnv::new();
 
     let start_stream_id = "1526919030404-0";
@@ -594,5 +459,142 @@ async fn test_xread_concurrent_different_keys() {
         let response = result.unwrap();
         assert!(response.contains(&key));
         assert!(response.contains("apple"));
+    }
+}
+
+#[tokio::test]
+async fn test_xread_concurrent_clients_multiple_pushes_with_incremental_stream_ids() {
+    let env = TestEnv::new();
+
+    // Start multiple XREAD clients
+    let mut xread_tasks = vec![];
+
+    for i in 0..3 {
+        let start_stream_id = format!("1526919030404-{}", i);
+        let client_addr = format!("127.0.0.1:1236{}", i);
+
+        let task = TestUtils::spawn_xread_task(
+            &env,
+            &["fruits"],
+            &[&start_stream_id],
+            "5000",
+            &client_addr,
+        );
+
+        xread_tasks.push(task);
+    }
+
+    // Give clients time to register
+    TestUtils::sleep_ms(100).await;
+
+    // Push multiple items in sequence
+    for i in 0..3 {
+        let mut env_mut = env.clone();
+        let client_addr = format!("127.0.0.1:1237{}", i);
+        let added_stream_id = format!("1526919030404-{}", i + 1);
+
+        env_mut
+            .exec_command_ok(
+                TestUtils::xadd_command(
+                    "fruits",
+                    &added_stream_id,
+                    &["mango", "apple", "raspberry", "pear"],
+                ),
+                &client_addr,
+                &TestUtils::expected_bulk_string(&added_stream_id),
+            )
+            .await;
+
+        // Small delay between pushes
+        TestUtils::sleep_ms(50).await;
+    }
+
+    // Collect all results
+    let mut results = vec![];
+    for task in xread_tasks {
+        let result = TestUtils::wait_for_completion(task, Duration::from_secs(1)).await;
+        results.push(result);
+    }
+
+    // All clients should get an item
+    let successful_results = TestUtils::filter_successful_results_containing(&results, "fruits");
+    assert_eq!(
+        successful_results.len(),
+        3,
+        "All clients should get an item"
+    );
+
+    // All clients should get their respective items
+    for (i, result) in results.iter().enumerate() {
+        assert!(result.is_ok());
+        let response = result.as_ref().unwrap();
+        assert!(response.contains("fruits"));
+        assert!(response.contains(format!("1526919030404-{}", i + 1).as_str()));
+    }
+}
+
+#[tokio::test]
+async fn test_xread_concurrent_clients_fanout() {
+    let env = TestEnv::new();
+
+    let start_stream_id = "1526919030404-0";
+    let added_stream_id = "1526919030404-1";
+
+    // Start multiple XREAD clients
+    let mut xread_tasks = vec![];
+
+    for i in 0..3 {
+        let client_addr = format!("127.0.0.1:1236{}", i);
+
+        let task = TestUtils::spawn_xread_task(
+            &env,
+            &["fruits"],
+            &[start_stream_id],
+            "5000",
+            &client_addr,
+        );
+
+        xread_tasks.push(task);
+    }
+
+    // Give clients time to register
+    TestUtils::sleep_ms(100).await;
+
+    // Push item
+    let mut env_mut = env.clone();
+
+    env_mut
+        .exec_command_ok(
+            TestUtils::xadd_command(
+                "fruits",
+                &added_stream_id,
+                &["mango", "apple", "raspberry", "pear"],
+            ),
+            &TestUtils::server_addr(41882),
+            &TestUtils::expected_bulk_string(&added_stream_id),
+        )
+        .await;
+
+    // Collect all results
+    let mut results = vec![];
+    for task in xread_tasks {
+        let result = TestUtils::wait_for_completion(task, Duration::from_secs(1)).await;
+        results.push(result);
+    }
+
+    // All clients should get the same item
+    let successful_results = TestUtils::filter_successful_results_containing(&results, "fruits");
+    assert_eq!(
+        successful_results.len(),
+        3,
+        "All clients should get an item"
+    );
+
+    // All clients should get their respective items
+    for result in results.iter() {
+        assert!(result.is_ok());
+        let response = result.as_ref().unwrap();
+        assert!(response.contains("fruits"));
+        assert!(response.contains(format!("1526919030404-1").as_str()));
     }
 }

@@ -1,12 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, oneshot};
 
 use crate::{
     commands::command_error::CommandError,
     key_value_store::{DataType, KeyValueStore},
     resp::RespValue,
-    state::{State, Subscriber},
+    state::{BlpopSubscriber, State},
 };
 
 pub async fn blpop(
@@ -42,33 +42,30 @@ pub async fn blpop(
         .parse::<f64>()
         .map_err(|_| CommandError::InvalidBLPopCommandArgument)?;
 
-    let (sender, mut receiver) = mpsc::channel(1);
-    let subscriber = Subscriber {
+    let (sender, receiver) = oneshot::channel();
+    let subscriber = BlpopSubscriber {
         server_address: server_address.clone(),
-        sender: sender.clone(), // Clone the sender so we keep one reference
+        sender,
     };
 
     let mut state_guard = state.lock().await;
-    state_guard.add_subscriber("BLPOP".to_string(), arguments[0].clone(), subscriber);
+    state_guard.add_blpop_subscriber(arguments[0].clone(), subscriber);
     drop(state_guard);
 
-    // Don't drop the sender here - let it be dropped naturally when the function ends
-    // This keeps the channel alive while we're waiting
-
     let result = match duration {
-        0.0 => receiver.recv().await,
-        num => match tokio::time::timeout(Duration::from_secs_f64(num), receiver.recv()).await {
+        0.0 => receiver.await,
+        num => match tokio::time::timeout(Duration::from_secs_f64(num), receiver).await {
             Ok(result) => result,
             Err(_) => {
                 let mut state_guard = state.lock().await;
-                state_guard.remove_subscriber("BLPOP", arguments[0].as_str(), &server_address);
+                state_guard.remove_blpop_subscriber(arguments[0].as_str(), &server_address);
                 return Ok(RespValue::Null.encode());
             }
         },
     };
 
     match result {
-        Some(_) => {
+        Ok(_) => {
             let mut store_guard = store.lock().await;
             let popped_value = if let Some(stored_data) = store_guard.get_mut(&arguments[0]) {
                 if let DataType::Array(ref mut list) = stored_data.data {
@@ -82,7 +79,7 @@ pub async fn blpop(
             drop(store_guard);
 
             let mut state_guard = state.lock().await;
-            state_guard.remove_subscriber("BLPOP", arguments[0].as_str(), &server_address);
+            state_guard.remove_blpop_subscriber(arguments[0].as_str(), &server_address);
             drop(state_guard);
 
             match popped_value {
@@ -93,9 +90,9 @@ pub async fn blpop(
                 None => Ok(RespValue::Null.encode()),
             }
         }
-        None => {
+        Err(_) => {
             let mut state_guard = state.lock().await;
-            state_guard.remove_subscriber("BLPOP", arguments[0].as_str(), &server_address);
+            state_guard.remove_blpop_subscriber(arguments[0].as_str(), &server_address);
             return Ok(RespValue::Null.encode());
         }
     }

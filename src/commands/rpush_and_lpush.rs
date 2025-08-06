@@ -89,7 +89,7 @@ async fn push_array_operations(
     // Only notify subscribers if the list was empty before and now has elements
     if was_empty_before {
         let mut state_guard = state.lock().await;
-        state_guard.send_to_subscriber("BLPOP", &arguments[0], true);
+        state_guard.send_to_blpop_subscriber(&arguments[0], true);
     }
 
     return Ok(RespValue::Integer(array_length as i64).encode());

@@ -4,11 +4,11 @@ use tokio::sync::{Mutex, mpsc};
 use crate::{
     commands::{
         command_error::CommandError,
-        x_range_and_xread_utils::{parse_stream_entries_to_resp, validate_stream_id},
+        stream_utils::{parse_stream_entries_to_resp, validate_stream_id},
     },
     key_value_store::{DataType, KeyValueStore, Stream},
     resp::RespValue,
-    state::{State, Subscriber},
+    state::{State, XreadSubscriber},
 };
 
 pub async fn xread(
@@ -50,23 +50,7 @@ pub async fn xread(
         return Err(CommandError::InvalidXReadCommand);
     }
 
-    let index = data
-        .iter()
-        .position(|arg| {
-            let split_argument = arg.split("-").collect::<Vec<&str>>();
-
-            if split_argument.len() == 2 {
-                return true;
-            }
-
-            let parsed_stream_id = arg.parse::<u128>().ok();
-            parsed_stream_id.is_some()
-        })
-        .ok_or_else(|| CommandError::InvalidXReadCommand)?;
-
-    if index != (data.len() / 2) {
-        return Err(CommandError::InvalidXReadCommand);
-    }
+    let index = data.len() / 2;
 
     let mut key_stream_id_pairs: Vec<(String, String)> = Vec::new();
 
@@ -86,14 +70,14 @@ pub async fn xread(
 
     let (sender, mut receiver) = mpsc::channel(32);
 
-    for (key, _) in &key_stream_id_pairs {
-        let subscriber = Subscriber {
+    for (key, stream_id) in &key_stream_id_pairs {
+        let subscriber = XreadSubscriber {
             server_address: server_address.clone(),
             sender: sender.clone(),
         };
 
         let mut state_guard = state.lock().await;
-        state_guard.add_subscriber("XREAD".to_string(), key.clone(), subscriber);
+        state_guard.add_xread_subscriber(key.clone(), stream_id.clone(), subscriber);
     }
 
     let result = match blocking_duration {
@@ -102,9 +86,9 @@ pub async fn xread(
             match tokio::time::timeout(Duration::from_millis(num), receiver.recv()).await {
                 Ok(result) => result,
                 Err(_) => {
-                    for (key, _) in &key_stream_id_pairs {
+                    for (key, stream_id) in &key_stream_id_pairs {
                         let mut state_guard = state.lock().await;
-                        state_guard.remove_subscriber("XREAD", key.as_str(), &server_address);
+                        state_guard.remove_xread_subscriber(key, stream_id, &server_address);
                         drop(state_guard);
                     }
 
@@ -122,9 +106,9 @@ pub async fn xread(
             return read_streams(store, key_stream_id_pairs).await;
         }
         None => {
-            for (key, _) in &key_stream_id_pairs {
+            for (key, stream_id) in &key_stream_id_pairs {
                 let mut state_guard = state.lock().await;
-                state_guard.remove_subscriber("XREAD", key.as_str(), &server_address);
+                state_guard.remove_xread_subscriber(key, stream_id, &server_address);
                 drop(state_guard);
             }
 
@@ -156,7 +140,7 @@ async fn read_streams(
                 .filter_map(|(id, entries)| {
                     let stream_id = validate_stream_id(id, false).ok()?;
 
-                    if is_stream_id_in_range(&stream_id, &start_stream_id) {
+                    if is_xread_stream_id_after(&stream_id, &start_stream_id) {
                         Some((id, entries))
                     } else {
                         None
@@ -177,7 +161,7 @@ async fn read_streams(
     return Ok(RespValue::Array(resp).encode());
 }
 
-fn is_stream_id_in_range(
+pub fn is_xread_stream_id_after(
     stream_id: &(u128, Option<u128>),
     start_stream_id: &(u128, Option<u128>),
 ) -> bool {

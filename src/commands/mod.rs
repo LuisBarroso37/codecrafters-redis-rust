@@ -9,11 +9,13 @@ mod lrange;
 mod ping;
 mod rpush_and_lpush;
 mod set;
+mod stream_utils;
 mod type_command;
-mod x_range_and_xread_utils;
 mod xadd;
 mod xrange;
 mod xread;
 
 pub use command_error::CommandError;
 pub use command_processor::CommandProcessor;
+pub use stream_utils::validate_stream_id;
+pub use xread::is_xread_stream_id_after;
