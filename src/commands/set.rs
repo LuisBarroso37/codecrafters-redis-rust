@@ -8,6 +8,41 @@ use crate::{
     resp::RespValue,
 };
 
+/// Handles the Redis SET command.
+///
+/// Stores a key-value pair in the key-value store with optional expiration.
+/// Supports the PX option to set expiration time in milliseconds.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `arguments` - A vector containing either:
+///   - 2 elements: [key, value] for permanent storage
+///   - 4 elements: [key, value, "PX", milliseconds] for expiring storage
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded "OK" simple string on success
+/// * `Err(CommandError::InvalidSetCommand)` - If wrong number of arguments
+/// * `Err(CommandError::InvalidSetCommandArgument)` - If expiration option is not "PX"
+/// * `Err(CommandError::InvalidSetCommandExpiration)` - If expiration time is invalid
+///
+/// # Examples
+///
+/// ```
+/// // SET mykey "hello"
+/// let result = set(&mut store, vec!["mykey".to_string(), "hello".to_string()]).await;
+/// // Returns: "+OK\r\n"
+///
+/// // SET mykey "hello" PX 1000  (expires in 1 second)
+/// let result = set(&mut store, vec![
+///     "mykey".to_string(),
+///     "hello".to_string(),
+///     "PX".to_string(),
+///     "1000".to_string()
+/// ]).await;
+/// // Returns: "+OK\r\n"
+/// ```
 pub async fn set(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,

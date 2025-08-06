@@ -8,6 +8,28 @@ use crate::{
     resp::RespValue,
 };
 
+/// Handles the Redis LLEN command.
+///
+/// Returns the length (number of elements) of a list stored at the given key.
+/// If the key doesn't exist or doesn't contain a list, returns 0.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `arguments` - A vector containing exactly one string (the key of the list)
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded integer representing the list length
+/// * `Err(CommandError::InvalidLLenCommand)` - If the number of arguments is not exactly 1
+///
+/// # Examples
+///
+/// ```
+/// // LLEN mylist
+/// let result = llen(&mut store, vec!["mylist".to_string()]).await;
+/// // Returns: ":3\r\n" (if list has 3 elements) or ":0\r\n" (if empty/non-existent)
+/// ```
 pub async fn llen(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,

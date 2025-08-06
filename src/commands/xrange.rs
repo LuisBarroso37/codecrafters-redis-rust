@@ -10,6 +10,39 @@ use crate::{
     resp::RespValue,
 };
 
+/// Handles the Redis XRANGE command.
+///
+/// Returns a range of entries from a Redis stream between two stream IDs.
+/// Supports special values "-" (start from beginning) and "+" (end at latest).
+/// The range is inclusive on both ends.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `arguments` - A vector containing exactly 3 elements: [key, start_id, end_id]
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded array containing the matching stream entries
+/// * `Err(CommandError::InvalidXRangeCommand)` - If the number of arguments is not exactly 3
+/// * `Err(CommandError::InvalidDataTypeForKey)` - If key exists but is not a stream
+/// * `Err(CommandError::InvalidStreamId)` - If start or end stream ID is invalid
+///
+/// # Examples
+///
+/// ```
+/// // XRANGE mystream - +  (get all entries)
+/// let result = xrange(&mut store, vec!["mystream".to_string(), "-".to_string(), "+".to_string()]).await;
+/// // Returns: "*2\r\n*2\r\n$15\r\n1518951480106-0\r\n*4\r\n$4\r\ntemp\r\n$2\r\n25\r\n..."
+///
+/// // XRANGE mystream 1518951480106-0 1518951480107-0  (get entries in range)
+/// let result = xrange(&mut store, vec![
+///     "mystream".to_string(),
+///     "1518951480106-0".to_string(),
+///     "1518951480107-0".to_string()
+/// ]).await;
+/// // Returns: "*1\r\n*2\r\n$15\r\n1518951480106-0\r\n*4\r\n$4\r\ntemp\r\n$2\r\n25\r\n..."
+/// ```
 pub async fn xrange(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
@@ -76,6 +109,20 @@ pub async fn xrange(
     }
 }
 
+/// Checks if a stream ID falls within a given range (inclusive).
+///
+/// Compares stream IDs which consist of a timestamp and optional sequence number.
+/// The comparison is done first by timestamp, then by sequence number if timestamps are equal.
+///
+/// # Arguments
+///
+/// * `stream_id` - The stream ID to check (timestamp, sequence)
+/// * `start_stream_id` - The start of the range (inclusive)
+/// * `end_stream_id` - The end of the range (inclusive)
+///
+/// # Returns
+///
+/// * `bool` - true if the stream ID is within the range, false otherwise
 fn is_stream_id_in_range(
     stream_id: &(u128, Option<u128>),
     start_stream_id: &(u128, Option<u128>),
@@ -100,6 +147,20 @@ fn is_stream_id_in_range(
     false
 }
 
+/// Checks if a sequence number falls within a given range (inclusive).
+///
+/// Handles the case where sequence numbers might be None (representing 0).
+/// Used when comparing stream IDs with the same timestamp.
+///
+/// # Arguments
+///
+/// * `sequence` - The sequence number to check
+/// * `start_sequence` - The start of the range (inclusive)
+/// * `end_sequence` - The end of the range (inclusive)
+///
+/// # Returns
+///
+/// * `bool` - true if the sequence is within the range, false otherwise
 fn is_sequence_in_range(
     sequence: &Option<u128>,
     start_sequence: &Option<u128>,
@@ -114,6 +175,19 @@ fn is_sequence_in_range(
     }
 }
 
+/// Checks if a sequence number is greater than or equal to a start sequence.
+///
+/// Used for range boundary checking when the timestamp matches the start timestamp.
+/// None is treated as 0 for comparison purposes.
+///
+/// # Arguments
+///
+/// * `sequence` - The sequence number to check
+/// * `start_sequence` - The minimum sequence number (inclusive)
+///
+/// # Returns
+///
+/// * `bool` - true if sequence >= start_sequence, false otherwise
 fn is_sequence_at_or_after(sequence: &Option<u128>, start_sequence: &Option<u128>) -> bool {
     match (sequence, start_sequence) {
         (Some(s), Some(start)) => s >= start,
@@ -122,6 +196,19 @@ fn is_sequence_at_or_after(sequence: &Option<u128>, start_sequence: &Option<u128
     }
 }
 
+/// Checks if a sequence number is less than or equal to an end sequence.
+///
+/// Used for range boundary checking when the timestamp matches the end timestamp.
+/// None is treated as 0 for comparison purposes.
+///
+/// # Arguments
+///
+/// * `sequence` - The sequence number to check
+/// * `end_sequence` - The maximum sequence number (inclusive)
+///
+/// # Returns
+///
+/// * `bool` - true if sequence <= end_sequence, false otherwise
 fn is_sequence_at_or_before(sequence: &Option<u128>, end_sequence: &Option<u128>) -> bool {
     match (sequence, end_sequence) {
         (Some(s), Some(end)) => s <= end,

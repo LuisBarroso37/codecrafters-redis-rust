@@ -8,6 +8,39 @@ use crate::{
     resp::RespValue,
 };
 
+/// Handles the Redis LPOP command.
+///
+/// Removes and returns one or more elements from the left (head) of a list.
+/// If no count is specified, removes and returns a single element.
+/// If the key doesn't exist or doesn't contain a list, returns null.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `arguments` - A vector containing:
+///   - 1 element: [key] - pops one element
+///   - 2 elements: [key, count] - pops specified number of elements
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded response:
+///   - Bulk string if popping one element
+///   - Array if popping multiple elements
+///   - Null if key doesn't exist, not a list, or list is empty
+/// * `Err(CommandError::InvalidLPopCommand)` - If wrong number of arguments
+/// * `Err(CommandError::InvalidLPopCommandArgument)` - If count is not a valid integer
+///
+/// # Examples
+///
+/// ```
+/// // LPOP mylist
+/// let result = lpop(&mut store, vec!["mylist".to_string()]).await;
+/// // Returns: "$3\r\nval\r\n" (single element) or "$-1\r\n" (null if empty)
+///
+/// // LPOP mylist 3
+/// let result = lpop(&mut store, vec!["mylist".to_string(), "3".to_string()]).await;
+/// // Returns: "*3\r\n$3\r\none\r\n$3\r\ntwo\r\n$5\r\nthree\r\n" (array of elements)
+/// ```
 pub async fn lpop(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,

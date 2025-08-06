@@ -8,6 +8,34 @@ use crate::{
     resp::RespValue,
 };
 
+/// Handles the Redis LRANGE command.
+///
+/// Returns a range of elements from a list stored at the given key.
+/// Both start and end indices can be negative to count from the end of the list.
+/// If the key doesn't exist or doesn't contain a list, returns an empty array.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `arguments` - A vector containing exactly 3 elements: [key, start_index, end_index]
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded array containing the requested range of elements
+/// * `Err(CommandError::InvalidLRangeCommand)` - If the number of arguments is not exactly 3
+/// * `Err(CommandError::InvalidLRangeCommandArgument)` - If start or end index is not a valid integer
+///
+/// # Examples
+///
+/// ```
+/// // LRANGE mylist 0 2  (get first 3 elements)
+/// let result = lrange(&mut store, vec!["mylist".to_string(), "0".to_string(), "2".to_string()]).await;
+/// // Returns: "*3\r\n$3\r\nval1\r\n$3\r\nval2\r\n$3\r\nval3\r\n"
+///
+/// // LRANGE mylist -2 -1  (get last 2 elements)
+/// let result = lrange(&mut store, vec!["mylist".to_string(), "-2".to_string(), "-1".to_string()]).await;
+/// // Returns: "*2\r\n$3\r\nval4\r\n$3\r\nval5\r\n"
+/// ```
 pub async fn lrange(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
@@ -60,6 +88,30 @@ pub async fn lrange(
     }
 }
 
+/// Validates and normalizes range indices for list operations.
+///
+/// Converts negative indices to positive equivalents and ensures the range is valid.
+/// Negative indices count from the end of the list (-1 is the last element).
+///
+/// # Arguments
+///
+/// * `list` - The list to validate indices against
+/// * `start_index` - The starting index (can be negative)
+/// * `end_index` - The ending index (can be negative)
+///
+/// # Returns
+///
+/// * `Ok((usize, usize))` - Normalized start and end indices if valid
+/// * `Err(&str)` - Error message if the range is invalid
+///
+/// # Examples
+///
+/// ```
+/// // For a list of length 5:
+/// // validate_range_indexes(&list, 0, 2) -> Ok((0, 2))
+/// // validate_range_indexes(&list, -2, -1) -> Ok((3, 4))
+/// // validate_range_indexes(&list, 5, 10) -> Err("invalid range")
+/// ```
 fn validate_range_indexes(
     list: &VecDeque<String>,
     start_index: isize,

@@ -9,6 +9,36 @@ use crate::{
     state::{BlpopSubscriber, State},
 };
 
+/// Handles the Redis BLPOP command.
+///
+/// Blocking version of LPOP that waits for an element to become available.
+/// If the list is empty or doesn't exist, the command blocks until:
+/// 1. An element is pushed to the list by another client
+/// 2. The timeout expires
+///
+/// # Arguments
+///
+/// * `server_address` - The address of the current server (for subscriber identification)
+/// * `store` - A thread-safe reference to the key-value store
+/// * `state` - A thread-safe reference to the server state (for blocking operations)
+/// * `arguments` - A vector containing exactly 2 elements: [key, timeout_seconds]
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded response:
+///   - Array with [key, value] if an element is available
+///   - Null if timeout expires without finding an element
+/// * `Err(CommandError::InvalidBLPopCommand)` - If the number of arguments is not exactly 2
+/// * `Err(CommandError::InvalidBLPopCommandArgument)` - If timeout is not a valid number
+///
+/// # Examples
+///
+/// ```
+/// // BLPOP mylist 5  (block for up to 5 seconds)
+/// let result = blpop("127.0.0.1:6379".to_string(), &mut store, &mut state,
+///                   vec!["mylist".to_string(), "5".to_string()]).await;
+/// // Returns: "*2\r\n$6\r\nmylist\r\n$5\r\nvalue\r\n" (key-value pair) or "$-1\r\n" (timeout)
+/// ```
 pub async fn blpop(
     server_address: String,
     store: &mut Arc<Mutex<KeyValueStore>>,

@@ -8,6 +8,32 @@ use crate::{
     resp::RespValue,
 };
 
+/// Handles the Redis TYPE command.
+///
+/// Returns the data type of the value stored at a given key.
+/// This is useful for determining what operations can be performed on a key.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `arguments` - A vector containing exactly one string (the key to check)
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded simple string indicating the type:
+///   - "string" for string values
+///   - "list" for array/list values  
+///   - "stream" for stream values
+///   - "none" if the key doesn't exist
+/// * `Err(CommandError::InvalidTypeCommand)` - If the number of arguments is not exactly 1
+///
+/// # Examples
+///
+/// ```
+/// // TYPE mykey
+/// let result = type_command(&mut store, vec!["mykey".to_string()]).await;
+/// // Returns: "+string\r\n" or "+none\r\n"
+/// ```
 pub async fn type_command(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,

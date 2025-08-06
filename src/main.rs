@@ -17,19 +17,32 @@ mod key_value_store;
 mod resp;
 mod state;
 
+/// Main entry point for the Redis server implementation.
+///
+/// Sets up a TCP server listening on port 6379 (standard Redis port) and handles
+/// incoming client connections. Each connection is processed in a separate async task
+/// to support concurrent clients.
+///
+/// The server maintains shared state including:
+/// - A key-value store for data storage
+/// - Server state for managing blocking operations and client subscriptions
 #[tokio::main]
 async fn main() {
+    // Bind to the standard Redis port
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
+    // Initialize shared state protected by mutexes for thread-safe access
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
     let state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
+    // Accept connections and spawn tasks to handle each client
     loop {
         match listener.accept().await {
             Ok((mut stream, _addr)) => {
                 let mut store = Arc::clone(&store);
                 let mut state = Arc::clone(&state);
 
+                // Handle each client connection in a separate task
                 tokio::spawn(async move {
                     loop {
                         let mut buf = [0; 1024];

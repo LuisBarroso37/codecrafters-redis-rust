@@ -13,6 +13,36 @@ use crate::{
     state::State,
 };
 
+/// Handles the Redis XADD command.
+///
+/// Adds a new entry to a Redis stream with the specified ID and field-value pairs.
+/// If the stream doesn't exist, it creates a new one. The stream ID must be greater
+/// than the last ID in the stream to maintain ordering.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `state` - A thread-safe reference to the server state (for XREAD notifications)
+/// * `arguments` - A vector containing: [key, stream_id, field1, value1, field2, value2, ...]
+///
+/// # Returns
+///
+/// * `Ok(String)` - A RESP-encoded bulk string containing the generated stream ID
+/// * `Err(CommandError::InvalidXAddCommand)` - If fewer than 4 arguments provided
+/// * `Err(CommandError::InvalidDataTypeForKey)` - If key exists but is not a stream
+/// * `Err(CommandError::InvalidStreamId)` - If the stream ID is invalid or out of order
+///
+/// # Examples
+///
+/// ```
+/// // XADD mystream * temperature 25 humidity 60
+/// let result = xadd(&mut store, &mut state, vec![
+///     "mystream".to_string(), "*".to_string(),
+///     "temperature".to_string(), "25".to_string(),
+///     "humidity".to_string(), "60".to_string()
+/// ]).await;
+/// // Returns: "$19\r\n1518951480106-0\r\n" (generated stream ID)
+/// ```
 pub async fn xadd(
     store: &mut Arc<Mutex<KeyValueStore>>,
     state: &mut Arc<Mutex<State>>,
@@ -72,6 +102,22 @@ pub async fn xadd(
     Ok(RespValue::BulkString(validated_stream_id).encode())
 }
 
+/// Validates and generates a stream ID for use in XADD operations.
+///
+/// Handles both explicit stream IDs and auto-generation using "*".
+/// Ensures that the new stream ID is greater than existing IDs in the stream
+/// to maintain chronological ordering.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `key` - The stream key to validate against
+/// * `stream_id` - The stream ID to validate ("*" for auto-generation or "timestamp-sequence")
+///
+/// # Returns
+///
+/// * `Ok(String)` - A validated stream ID in format "timestamp-sequence"
+/// * `Err(String)` - Error message if the stream ID is invalid or out of order
 async fn validate_stream_id_against_store(
     store: &mut Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -121,6 +167,21 @@ async fn validate_stream_id_against_store(
     }
 }
 
+/// Calculates the next sequence number for a stream ID with a given timestamp.
+///
+/// For auto-generated stream IDs, this function determines what sequence number
+/// should be used for a given timestamp, ensuring uniqueness and proper ordering.
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `key` - The stream key to check for existing entries
+/// * `stream_id` - The timestamp part of the stream ID
+///
+/// # Returns
+///
+/// * `Ok(u128)` - The next available sequence number for this timestamp
+/// * `Err(String)` - Error message if the stream contains invalid data
 async fn get_next_stream_id_index(
     store: &Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -168,6 +229,15 @@ async fn get_next_stream_id_index(
     };
 }
 
+/// Gets the current system time as milliseconds since Unix epoch.
+///
+/// Used for generating the timestamp part of auto-generated stream IDs.
+/// This ensures that stream entries are naturally ordered by creation time.
+///
+/// # Returns
+///
+/// * `Ok(u128)` - Current time in milliseconds since Unix epoch
+/// * `Err(SystemTimeError)` - If system time is before Unix epoch (should not happen in practice)
 fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
     let current_system_time = SystemTime::now();
     let duration_since_epoch = current_system_time.duration_since(SystemTime::UNIX_EPOCH)?;

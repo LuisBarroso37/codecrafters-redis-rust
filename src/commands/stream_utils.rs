@@ -2,6 +2,30 @@ use std::collections::BTreeMap;
 
 use crate::resp::RespValue;
 
+/// Validates and parses a stream ID string into its components.
+///
+/// Stream IDs have the format "timestamp-sequence" where both parts are integers.
+/// The sequence part is optional and defaults to 0 if not provided.
+///
+/// # Arguments
+///
+/// * `command_argument` - The stream ID string to validate (e.g., "1234567890-0")
+/// * `is_zero_zero_forbidden` - Whether to reject the special "0-0" ID
+///
+/// # Returns
+///
+/// * `Ok((u128, Option<u128>))` - Parsed timestamp and optional sequence number
+/// * `Err(String)` - Error message if the stream ID is invalid
+///
+/// # Examples
+///
+/// ```
+/// let result = validate_stream_id("1234567890-5", false);
+/// // Returns: Ok((1234567890, Some(5)))
+///
+/// let result = validate_stream_id("1234567890", false);
+/// // Returns: Ok((1234567890, None))
+/// ```
 pub fn validate_stream_id(
     command_argument: &str,
     is_zero_zero_forbidden: bool,
@@ -32,6 +56,30 @@ pub fn validate_stream_id(
     }
 }
 
+/// Converts stream entries to RESP array format.
+///
+/// Takes a collection of stream entries (each with an ID and field-value map)
+/// and converts them to the RESP format expected by Redis clients.
+/// Each entry becomes a 2-element array: [stream_id, [field1, value1, field2, value2, ...]]
+///
+/// # Arguments
+///
+/// * `entries` - Vector of tuples containing (stream_id, field_value_map)
+///
+/// # Returns
+///
+/// * `RespValue` - A RESP array containing all the formatted stream entries
+///
+/// # Examples
+///
+/// ```
+/// let entries = vec![
+///     (&"1234-0".to_string(), &btreemap!{"temp".to_string() => "25".to_string()}),
+///     (&"1235-0".to_string(), &btreemap!{"temp".to_string() => "26".to_string()})
+/// ];
+/// let result = parse_stream_entries_to_resp(entries);
+/// // Returns: "*2\r\n*2\r\n$6\r\n1234-0\r\n*2\r\n$4\r\ntemp\r\n$2\r\n25\r\n*2\r\n$6\r\n1235-0\r\n*2\r\n$4\r\ntemp\r\n$2\r\n26\r\n"
+/// ```
 pub fn parse_stream_entries_to_resp(
     entries: Vec<(&String, &BTreeMap<String, String>)>,
 ) -> RespValue {
