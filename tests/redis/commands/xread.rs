@@ -239,7 +239,7 @@ async fn test_handle_xread_blocking_command_direct_response() {
 }
 
 #[tokio::test]
-async fn test_xread_concurrent_clients_simple_blocking() {
+async fn test_xread_simple_blocking() {
     let env = TestEnv::new();
 
     let start_stream_id = "1526919030404-0";
@@ -596,5 +596,315 @@ async fn test_xread_concurrent_clients_fanout() {
         let response = result.as_ref().unwrap();
         assert!(response.contains("fruits"));
         assert!(response.contains(format!("1526919030404-1").as_str()));
+    }
+}
+
+#[tokio::test]
+async fn test_xread_simple_blocking_with_special_id_return_immediately_if_stream_is_empty() {
+    let env = TestEnv::new();
+    // Client tries to XREAD from empty stream (should immediately return)
+    let client_task = TestUtils::spawn_xread_task(
+        &env,
+        &["fruits"],
+        &["$"],
+        "2000",
+        &TestUtils::server_addr(12345),
+    );
+
+    // Wait for client to complete
+    let client_result = TestUtils::wait_for_completion(client_task, Duration::from_secs(3)).await;
+
+    // Client should get empty array
+    assert_eq!(client_result, Ok("*0\r\n".to_string()));
+}
+
+#[tokio::test]
+async fn test_xread_simple_blocking_with_special_id() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::xadd_command(
+            "fruits",
+            "1526919030404-0",
+            &["mango", "apple", "raspberry", "pear"],
+        ),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_bulk_string("1526919030404-0"),
+    )
+    .await;
+
+    // Client tries to XREAD from empty stream (should block)
+    let client_task = TestUtils::spawn_xread_task(
+        &env.clone(),
+        &["fruits"],
+        &["$"],
+        "2000",
+        &TestUtils::server_addr(12345),
+    );
+
+    // Give client time to register as subscriber
+    TestUtils::sleep_ms(500).await;
+
+    // Push an element to unblock the client
+    let mut env_mut = env.clone();
+
+    env_mut
+        .exec_command_ok(
+            TestUtils::xadd_command(
+                "fruits",
+                "1526919030404-1",
+                &["mango", "apple", "raspberry", "pear"],
+            ),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_bulk_string("1526919030404-1"),
+        )
+        .await;
+
+    // Wait for client to complete
+    let client_result = TestUtils::wait_for_completion(client_task, Duration::from_secs(3)).await;
+
+    // Client should get the item
+    assert_eq!(client_result, Ok("*1\r\n*2\r\n$6\r\nfruits\r\n*1\r\n*2\r\n$15\r\n1526919030404-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n".to_string()));
+}
+
+#[tokio::test]
+async fn test_xread_multiple_streams_single_client() {
+    let env = TestEnv::new();
+
+    let start_stream_id_fruits = "1526919030404-0";
+    let start_stream_id_vegetables = "1526919030404-0";
+
+    // Client tries to XREAD from multiple empty streams (should block)
+    let client_task = TestUtils::spawn_xread_task(
+        &env,
+        &["fruits", "vegetables"],
+        &[start_stream_id_fruits, start_stream_id_vegetables],
+        "3000",
+        &TestUtils::server_addr(12345),
+    );
+
+    // Give client time to register as subscriber
+    TestUtils::sleep_ms(500).await;
+
+    // Push elements to both streams to unblock the client
+    let mut env_mut = env.clone();
+
+    env_mut
+        .exec_command_ok(
+            TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_bulk_string("1526919030404-1"),
+        )
+        .await;
+
+    env_mut
+        .exec_command_ok(
+            TestUtils::xadd_command("vegetables", "1526919030404-1", &["carrot", "potato"]),
+            &TestUtils::server_addr(41845),
+            &TestUtils::expected_bulk_string("1526919030404-1"),
+        )
+        .await;
+
+    // Wait for client to complete
+    let client_result = TestUtils::wait_for_completion(client_task, Duration::from_secs(3)).await;
+
+    // Client should get items from both streams
+    assert!(client_result.is_ok());
+    let response = client_result.unwrap();
+    assert!(response.contains("fruits"));
+    assert!(response.contains("vegetables"));
+    assert!(response.contains("mango"));
+    assert!(response.contains("carrot"));
+}
+
+#[tokio::test]
+async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
+    let env = TestEnv::new();
+
+    let start_stream_id = "1526919030404-0";
+
+    // Client 1 listens to fruits and vegetables
+    let client1_task = TestUtils::spawn_xread_task(
+        &env,
+        &["fruits", "vegetables"],
+        &[start_stream_id, start_stream_id],
+        "3000",
+        &TestUtils::server_addr(12345),
+    );
+
+    // Client 2 listens to only vegetables and animals
+    let client2_task = TestUtils::spawn_xread_task(
+        &env,
+        &["vegetables", "animals"],
+        &[start_stream_id, start_stream_id],
+        "800",
+        &TestUtils::server_addr(12346),
+    );
+
+    // Give clients time to register
+    TestUtils::sleep_ms(500).await;
+
+    // Push only to fruits stream - should only unblock client1
+    let mut env_mut = env.clone();
+
+    env_mut
+        .exec_command_ok(
+            TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_bulk_string("1526919030404-1"),
+        )
+        .await;
+
+    // Wait for client1 to complete, client2 should timeout
+    let client1_result = TestUtils::wait_for_completion(client1_task, Duration::from_secs(2)).await;
+    let client2_result = TestUtils::wait_for_completion(client2_task, Duration::from_secs(1)).await;
+
+    // Client1 should get the fruits item
+    assert!(client1_result.is_ok());
+    let response1 = client1_result.unwrap();
+    assert!(response1.contains("fruits"));
+    assert!(response1.contains("mango"));
+
+    // Client2 should timeout (return null)
+    assert!(client2_result.is_ok());
+    let response2 = client2_result.unwrap();
+    assert_eq!(response2, TestUtils::expected_null());
+}
+
+#[tokio::test]
+async fn test_xread_multiple_streams_concurrent_clients_same_streams() {
+    let env = TestEnv::new();
+
+    let start_stream_id = "1526919030404-0";
+
+    // Multiple clients listening to the same streams
+    let mut client_tasks = vec![];
+
+    for i in 0..3 {
+        let client_addr = format!("127.0.0.1:1234{}", i + 5);
+        let task = TestUtils::spawn_xread_task(
+            &env,
+            &["fruits", "vegetables"],
+            &[start_stream_id, start_stream_id],
+            "3000",
+            &client_addr,
+        );
+        client_tasks.push(task);
+    }
+
+    // Give clients time to register
+    TestUtils::sleep_ms(500).await;
+
+    // Push to one of the streams
+    let mut env_mut = env.clone();
+
+    env_mut
+        .exec_command_ok(
+            TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_bulk_string("1526919030404-1"),
+        )
+        .await;
+
+    // Collect all results
+    let mut results = vec![];
+    for task in client_tasks {
+        let result = TestUtils::wait_for_completion(task, Duration::from_secs(2)).await;
+        results.push(result);
+    }
+
+    // All clients should get responses with both streams
+    let successful_results = TestUtils::filter_successful_results_containing(&results, "fruits");
+    assert_eq!(
+        successful_results.len(),
+        3,
+        "All clients should get responses"
+    );
+
+    // Each response should contain both streams
+    for result in successful_results.iter() {
+        assert!(result.contains("fruits"));
+        assert!(!result.contains("vegetables"));
+        assert!(result.contains("mango"));
+        assert!(!result.contains("carrot"));
+    }
+}
+
+#[tokio::test]
+async fn test_xread_multiple_streams_concurrent_clients_special_ids() {
+    let mut env = TestEnv::new();
+
+    // Pre-populate both streams
+    env.exec_command_ok(
+        TestUtils::xadd_command("fruits", "1526919030404-0", &["orange", "banana"]),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_bulk_string("1526919030404-0"),
+    )
+    .await;
+
+    env.exec_command_ok(
+        TestUtils::xadd_command("vegetables", "1526919030404-0", &["onion", "garlic"]),
+        &TestUtils::server_addr(41845),
+        &TestUtils::expected_bulk_string("1526919030404-0"),
+    )
+    .await;
+
+    // Multiple clients listening with special ID "$" (after last entry)
+    let mut client_tasks = vec![];
+
+    for i in 0..3 {
+        let client_addr = format!("127.0.0.1:1235{}", i + 5);
+        let task = TestUtils::spawn_xread_task(
+            &env,
+            &["fruits", "vegetables"],
+            &["$", "$"],
+            "3000",
+            &client_addr,
+        );
+        client_tasks.push(task);
+    }
+
+    // Give clients time to register
+    TestUtils::sleep_ms(500).await;
+
+    // Push new entries to both streams
+    env.exec_command_ok(
+        TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_bulk_string("1526919030404-1"),
+    )
+    .await;
+
+    env.exec_command_ok(
+        TestUtils::xadd_command("vegetables", "1526919030404-1", &["carrot", "potato"]),
+        &TestUtils::server_addr(41845),
+        &TestUtils::expected_bulk_string("1526919030404-1"),
+    )
+    .await;
+
+    // Collect all results
+    let mut results = vec![];
+    for task in client_tasks {
+        let result = TestUtils::wait_for_completion(task, Duration::from_secs(2)).await;
+        results.push(result);
+    }
+
+    // All clients should get responses with both streams
+    let successful_results = TestUtils::filter_successful_results_containing(&results, "fruits");
+    assert_eq!(
+        successful_results.len(),
+        3,
+        "All clients should get responses"
+    );
+
+    // Each response should contain both streams with the new entries
+    for result in successful_results.iter() {
+        assert!(result.contains("fruits"));
+        assert!(result.contains("vegetables"));
+        assert!(result.contains("mango"));
+        assert!(result.contains("carrot"));
+        // Should NOT contain the pre-existing entries
+        assert!(!result.contains("orange"));
+        assert!(!result.contains("onion"));
     }
 }

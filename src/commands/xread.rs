@@ -55,17 +55,43 @@ pub async fn xread(
     let mut key_stream_id_pairs: Vec<(String, String)> = Vec::new();
 
     for i in 0..index {
-        key_stream_id_pairs.push((data[i].clone(), data[index + i].clone()));
+        let key = data[i].clone();
+        let mut stream_id = data[index + i].clone();
+
+        if stream_id == "$" {
+            let store_guard = store.lock().await;
+            if let Some(value) = store_guard.get(&key) {
+                let stream = match value.data {
+                    DataType::Stream(ref stream) => stream,
+                    _ => return Err(CommandError::InvalidDataTypeForKey),
+                };
+
+                let last_key_value = stream.last_key_value();
+
+                match last_key_value {
+                    Some((last_stream_id, _)) => {
+                        stream_id = last_stream_id.clone();
+                    }
+                    None => {
+                        return Ok(RespValue::Array(Vec::new()).encode());
+                    }
+                }
+            } else {
+                return Ok(RespValue::Array(Vec::new()).encode());
+            }
+        }
+
+        key_stream_id_pairs.push((key, stream_id));
     }
 
     if blocking_duration.is_none() {
         return read_streams(store, key_stream_id_pairs).await;
-    } else {
-        let direct_call_response = read_streams(store, key_stream_id_pairs.clone()).await?;
+    }
 
-        if direct_call_response != RespValue::Array(vec![]).encode() {
-            return Ok(direct_call_response);
-        }
+    let direct_call_response = read_streams(store, key_stream_id_pairs.clone()).await?;
+
+    if direct_call_response != RespValue::Array(vec![]).encode() {
+        return Ok(direct_call_response);
     }
 
     let (sender, mut receiver) = mpsc::channel(32);
