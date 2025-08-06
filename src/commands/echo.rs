@@ -1,5 +1,46 @@
 use crate::{commands::command_error::CommandError, resp::RespValue};
 
+/// Represents the parsed arguments for ECHO command
+struct EchoArguments {
+    /// String to return as response
+    argument: String,
+}
+
+impl EchoArguments {
+    /// Parses command arguments into an EchoArguments structure.
+    ///
+    /// This function validates that exactly one argument is provided for the ECHO command
+    /// and creates an EchoArguments instance containing the argument to be echoed back.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - A vector of strings representing the command arguments
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(EchoArguments)` - Successfully parsed arguments with the string to echo
+    /// * `Err(CommandError::InvalidEchoCommand)` - If the number of arguments is not exactly 1
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let result = EchoArguments::parse(vec!["hello".to_string()]);
+    /// // Returns: Ok(EchoArguments { argument: "hello".to_string() })
+    ///
+    /// let result = EchoArguments::parse(vec![]);
+    /// // Returns: Err(CommandError::InvalidEchoCommand)
+    /// ```
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() != 1 {
+            return Err(CommandError::InvalidEchoCommand);
+        }
+
+        Ok(Self {
+            argument: arguments[0].clone(),
+        })
+    }
+}
+
 /// Handles the Redis ECHO command.
 ///
 /// The ECHO command returns the exact string provided as an argument.
@@ -23,10 +64,7 @@ use crate::{commands::command_error::CommandError, resp::RespValue};
 /// // Returns: "$11\r\nhello world\r\n"
 /// ```
 pub fn echo(arguments: Vec<String>) -> Result<String, CommandError> {
-    if arguments.len() != 1 {
-        return Err(CommandError::InvalidEchoCommand);
-    }
+    let echo_arguments = EchoArguments::parse(arguments)?;
 
-    let arg = arguments[0].clone();
-    return Ok(RespValue::BulkString(arg).encode());
+    Ok(RespValue::BulkString(echo_arguments.argument).encode())
 }

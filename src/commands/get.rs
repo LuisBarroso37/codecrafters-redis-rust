@@ -4,9 +4,50 @@ use tokio::{sync::Mutex, time::Instant};
 
 use crate::{
     commands::command_error::CommandError,
-    key_value_store::{DataType, KeyValueStore},
+    key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
 };
+
+/// Represents the parsed arguments for GET command
+struct GetArguments {
+    /// The key name to retrieve from the store
+    key: String,
+}
+
+impl GetArguments {
+    /// Parses command arguments into a GetArguments structure.
+    ///
+    /// This function validates that exactly one argument is provided for the GET command
+    /// and creates a GetArguments instance containing the key to be retrieved.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - A vector of strings representing the command arguments
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(GetArguments)` - Successfully parsed arguments with the key to retrieve
+    /// * `Err(CommandError::InvalidGetCommand)` - If the number of arguments is not exactly 1
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let result = GetArguments::parse(vec!["mykey".to_string()]);
+    /// // Returns: Ok(GetArguments { key: "mykey".to_string() })
+    ///
+    /// let result = GetArguments::parse(vec!["key1".to_string(), "key2".to_string()]);
+    /// // Returns: Err(CommandError::InvalidGetCommand)
+    /// ```
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() != 1 {
+            return Err(CommandError::InvalidGetCommand);
+        }
+
+        return Ok(Self {
+            key: arguments[0].clone(),
+        });
+    }
+}
 
 /// Handles the Redis GET command.
 ///
@@ -37,33 +78,60 @@ pub async fn get(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
-    if arguments.len() != 1 {
-        return Err(CommandError::InvalidGetCommand);
-    }
+    let get_arguments = GetArguments::parse(arguments)?;
 
     let mut store_guard = store.lock().await;
-    let stored_data = store_guard.get(&arguments[0]);
+    let stored_data = store_guard.get(&get_arguments.key);
 
-    match stored_data {
-        Some(value) => {
-            if let Some(expiration) = value.expiration {
-                if Instant::now() > expiration {
-                    store_guard.remove(&arguments[0]);
-                    return Ok(RespValue::Null.encode());
-                }
-            }
+    let Some(value) = stored_data else {
+        return Ok(RespValue::Null.encode());
+    };
 
-            match value.data {
-                DataType::String(ref s) => {
-                    return Ok(RespValue::BulkString(s.clone()).encode());
-                }
-                _ => {
-                    return Ok(RespValue::Null.encode());
-                }
-            }
-        }
-        None => {
-            return Ok(RespValue::Null.encode());
-        }
+    if is_value_expiration(&value) {
+        store_guard.remove(&get_arguments.key);
+        return Ok(RespValue::Null.encode());
     }
+
+    match value.data {
+        DataType::String(ref s) => Ok(RespValue::BulkString(s.clone()).encode()),
+        _ => Ok(RespValue::Null.encode()),
+    }
+}
+
+/// Checks if a stored value has expired based on its expiration timestamp.
+///
+/// This function examines the expiration field of a value and compares it
+/// against the current time to determine if the value should be considered expired.
+/// Values without an expiration time are never considered expired.
+///
+/// # Arguments
+///
+/// * `value` - A reference to the Value to check for expiration
+///
+/// # Returns
+///
+/// * `true` - If the value has an expiration time and that time has passed
+/// * `false` - If the value has no expiration time or the expiration time hasn't been reached
+///
+/// # Examples
+///
+/// ```
+/// let expired_value = Value { expiration: Some(past_instant), data: DataType::String("test".to_string()) };
+/// let result = is_value_expiration(&expired_value);
+/// // Returns: true
+///
+/// let valid_value = Value { expiration: None, data: DataType::String("test".to_string()) };
+/// let result = is_value_expiration(&valid_value);
+/// // Returns: false
+/// ```
+fn is_value_expiration(value: &Value) -> bool {
+    if let Some(expiration) = value.expiration {
+        if Instant::now() > expiration {
+            return true;
+        }
+
+        return false;
+    }
+
+    return false;
 }
