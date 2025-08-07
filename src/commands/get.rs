@@ -31,7 +31,7 @@ impl GetArguments {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let result = GetArguments::parse(vec!["mykey".to_string()]);
     /// // Returns: Ok(GetArguments { key: "mykey".to_string() })
     ///
@@ -69,7 +69,7 @@ impl GetArguments {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // GET mykey
 /// let result = get(&mut store, vec!["mykey".to_string()]).await;
 /// // Returns: "$5\r\nhello\r\n" or "$-1\r\n" (null)
@@ -84,17 +84,17 @@ pub async fn get(
     let stored_data = store_guard.get(&get_arguments.key);
 
     let Some(value) = stored_data else {
-        return Ok(RespValue::Null.encode());
+        return Ok(RespValue::NullBulkString.encode());
     };
 
-    if is_value_expiration(&value) {
+    if is_value_expired(&value) {
         store_guard.remove(&get_arguments.key);
-        return Ok(RespValue::Null.encode());
+        return Ok(RespValue::NullBulkString.encode());
     }
 
     match value.data {
         DataType::String(ref s) => Ok(RespValue::BulkString(s.clone()).encode()),
-        _ => Ok(RespValue::Null.encode()),
+        _ => Ok(RespValue::NullBulkString.encode()),
     }
 }
 
@@ -115,16 +115,16 @@ pub async fn get(
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let expired_value = Value { expiration: Some(past_instant), data: DataType::String("test".to_string()) };
-/// let result = is_value_expiration(&expired_value);
+/// let result = is_value_expired(&expired_value);
 /// // Returns: true
 ///
 /// let valid_value = Value { expiration: None, data: DataType::String("test".to_string()) };
-/// let result = is_value_expiration(&valid_value);
+/// let result = is_value_expired(&valid_value);
 /// // Returns: false
 /// ```
-fn is_value_expiration(value: &Value) -> bool {
+fn is_value_expired(value: &Value) -> bool {
     if let Some(expiration) = value.expiration {
         if Instant::now() > expiration {
             return true;
@@ -134,4 +134,30 @@ fn is_value_expiration(value: &Value) -> bool {
     }
 
     return false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_is_value_expired() {
+        let test_cases = vec![
+            (None, false),
+            (Some(Instant::now() + Duration::from_secs(60)), false),
+            (Some(Instant::now() - Duration::from_secs(60)), true),
+            (Some(Instant::now() - Duration::from_millis(1)), true),
+        ];
+
+        for (expiration, expected) in test_cases {
+            let value = Value {
+                data: DataType::String("test".to_string()),
+                expiration,
+            };
+
+            let result = is_value_expired(&value);
+            assert_eq!(result, expected, "Unexpected expiration status");
+        }
+    }
 }

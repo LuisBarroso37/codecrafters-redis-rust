@@ -157,7 +157,7 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
     env.exec_command_err(
         TestUtils::xrange_command("fruits", "0-0", "0-2"),
         &TestUtils::server_addr(41844),
-        CommandError::InvalidStreamId("The stream id must be greater than 0-0".to_string()),
+        CommandError::InvalidStreamId("Stream ID must be greater than 0-0".to_string()),
     )
     .await;
 }

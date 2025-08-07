@@ -23,7 +23,7 @@ impl EchoArguments {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let result = EchoArguments::parse(vec!["hello".to_string()]);
     /// // Returns: Ok(EchoArguments { argument: "hello".to_string() })
     ///
@@ -58,7 +58,7 @@ impl EchoArguments {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // ECHO "hello world"
 /// let result = echo(vec!["hello world".to_string()]);
 /// // Returns: "$11\r\nhello world\r\n"

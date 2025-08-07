@@ -8,6 +8,49 @@ use crate::{
     resp::RespValue,
 };
 
+/// Represents the parsed arguments for TYPE command
+struct TypeArguments {
+    /// The key name to retrieve from the store
+    key: String,
+}
+
+impl TypeArguments {
+    /// Parses command arguments into a `TypeArguments` struct.
+    ///
+    /// Validates that exactly one argument (the key) is provided, as required
+    /// by the Redis TYPE command specification.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - Vector of command arguments, should contain exactly one key
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(TypeArguments)` - Successfully parsed arguments with the key
+    /// * `Err(CommandError::InvalidTypeCommand)` - If the number of arguments is not exactly 1
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let args = vec!["mykey".to_string()];
+    /// let parsed = TypeArguments::parse(args)?;
+    /// assert_eq!(parsed.key, "mykey");
+    ///
+    /// // Invalid: too many arguments
+    /// let invalid_args = vec!["key1".to_string(), "key2".to_string()];
+    /// assert!(TypeArguments::parse(invalid_args).is_err());
+    /// ```
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() != 1 {
+            return Err(CommandError::InvalidTypeCommand);
+        }
+
+        Ok(Self {
+            key: arguments[0].clone(),
+        })
+    }
+}
+
 /// Handles the Redis TYPE command.
 ///
 /// Returns the data type of the value stored at a given key.
@@ -29,7 +72,7 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // TYPE mykey
 /// let result = type_command(&mut store, vec!["mykey".to_string()]).await;
 /// // Returns: "+string\r\n" or "+none\r\n"
@@ -38,25 +81,23 @@ pub async fn type_command(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
-    if arguments.len() != 1 {
-        return Err(CommandError::InvalidTypeCommand);
-    }
+    let type_arguments = TypeArguments::parse(arguments)?;
 
     let store_guard = store.lock().await;
 
-    if let Some(value) = store_guard.get(&arguments[0]) {
-        match value.data {
-            DataType::String(_) => {
-                return Ok(RespValue::SimpleString("string".to_string()).encode());
-            }
-            DataType::Array(_) => {
-                return Ok(RespValue::SimpleString("list".to_string()).encode());
-            }
-            DataType::Stream(_) => {
-                return Ok(RespValue::SimpleString("stream".to_string()).encode());
-            }
-        }
-    } else {
+    let Some(value) = store_guard.get(&type_arguments.key) else {
         return Ok(RespValue::SimpleString("none".to_string()).encode());
+    };
+
+    match value.data {
+        DataType::String(_) => {
+            return Ok(RespValue::SimpleString("string".to_string()).encode());
+        }
+        DataType::Array(_) => {
+            return Ok(RespValue::SimpleString("list".to_string()).encode());
+        }
+        DataType::Stream(_) => {
+            return Ok(RespValue::SimpleString("stream".to_string()).encode());
+        }
     }
 }

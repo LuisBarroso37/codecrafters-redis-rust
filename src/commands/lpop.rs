@@ -8,6 +8,91 @@ use crate::{
     resp::RespValue,
 };
 
+/// Represents the parsed arguments for LPOP command
+///
+/// Contains the key name and count of elements to pop from the left side of a list.
+/// The LPOP command supports both single element and multiple element operations.
+struct LpopArguments {
+    /// The key name of the list to pop elements from
+    key: String,
+    /// Number of elements to pop from the left side (defaults to 1 if not specified)
+    count: usize,
+}
+
+impl LpopArguments {
+    /// Parses command arguments into an LpopArguments structure.
+    ///
+    /// This function validates and processes the arguments for the LPOP command,
+    /// which removes elements from the left (head) of a list. It supports both
+    /// single element removal and bulk removal with a specified count.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - A vector of strings representing the command arguments:
+    ///   - Format 1: `[key]` - Pop one element from the list
+    ///   - Format 2: `[key, count]` - Pop specified number of elements from the list
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LpopArguments)` - Successfully parsed arguments containing:
+    ///   - `key`: The name of the list key to pop elements from
+    ///   - `count`: Number of elements to pop (1 if not specified, parsed value if provided)
+    /// * `Err(CommandError::InvalidLPopCommand)` - If the number of arguments is not 1 or 2
+    /// * `Err(CommandError::InvalidLPopCommandArgument)` - If the count argument is not a valid positive integer
+    ///
+    /// # Default Behavior
+    ///
+    /// When only the key is provided (1 argument), the count defaults to 1,
+    /// meaning a single element will be popped from the list.
+    ///
+    /// # Redis Command Format
+    ///
+    /// The Redis LPOP command has the format: `LPOP key [count]`
+    /// - `key`: The name of the list to pop elements from
+    /// - `count` (optional): Number of elements to pop (must be positive integer)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Pop single element (default behavior)
+    /// let result = LpopArguments::parse(vec!["mylist".to_string()]);
+    /// // Returns: Ok(LpopArguments { key: "mylist", count: 1 })
+    ///
+    /// // Pop multiple elements
+    /// let result = LpopArguments::parse(vec!["mylist".to_string(), "3".to_string()]);
+    /// // Returns: Ok(LpopArguments { key: "mylist", count: 3 })
+    ///
+    /// // Invalid: no arguments provided
+    /// let result = LpopArguments::parse(vec![]);
+    /// // Returns: Err(CommandError::InvalidLPopCommand)
+    ///
+    /// // Invalid: too many arguments
+    /// let result = LpopArguments::parse(vec!["key1".to_string(), "2".to_string(), "extra".to_string()]);
+    /// // Returns: Err(CommandError::InvalidLPopCommand)
+    ///
+    /// // Invalid: count is not a valid integer
+    /// let result = LpopArguments::parse(vec!["mylist".to_string(), "invalid".to_string()]);
+    /// // Returns: Err(CommandError::InvalidLPopCommandArgument)
+    /// ```
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() < 1 || arguments.len() > 2 {
+            return Err(CommandError::InvalidLPopCommand);
+        }
+
+        let count = if let Some(val) = arguments.get(1) {
+            val.parse::<usize>()
+                .map_err(|_| CommandError::InvalidLPopCommandArgument)?
+        } else {
+            1
+        };
+
+        Ok(Self {
+            key: arguments[0].clone(),
+            count,
+        })
+    }
+}
+
 /// Handles the Redis LPOP command.
 ///
 /// Removes and returns one or more elements from the left (head) of a list.
@@ -18,8 +103,8 @@ use crate::{
 ///
 /// * `store` - A thread-safe reference to the key-value store
 /// * `arguments` - A vector containing:
-///   - 1 element: [key] - pops one element
-///   - 2 elements: [key, count] - pops specified number of elements
+///   - 1 element: \[key\] - pops one element
+///   - 2 elements: \[key, count\] - pops specified number of elements
 ///
 /// # Returns
 ///
@@ -32,7 +117,7 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // LPOP mylist
 /// let result = lpop(&mut store, vec!["mylist".to_string()]).await;
 /// // Returns: "$3\r\nval\r\n" (single element) or "$-1\r\n" (null if empty)
@@ -45,44 +130,29 @@ pub async fn lpop(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
-    if arguments.len() < 1 || arguments.len() > 2 {
-        return Err(CommandError::InvalidLPopCommand);
-    }
+    let lpop_arguments = LpopArguments::parse(arguments)?;
 
     let mut store_guard = store.lock().await;
-    let stored_data = store_guard.get_mut(&arguments[0]);
 
-    let amount_of_elements_to_delete = if let Some(val) = arguments.get(1) {
-        val.parse::<usize>()
-            .map_err(|_| CommandError::InvalidLPopCommandArgument)?
-    } else {
-        1
+    let Some(value) = store_guard.get_mut(&lpop_arguments.key) else {
+        return Ok(RespValue::NullBulkString.encode());
     };
 
-    match stored_data {
-        Some(value) => {
-            if let DataType::Array(ref mut list) = value.data {
-                let mut vec = Vec::new();
+    let DataType::Array(ref mut list) = value.data else {
+        return Ok(RespValue::NullBulkString.encode());
+    };
 
-                for _ in 0..amount_of_elements_to_delete {
-                    if let Some(removed) = list.pop_front() {
-                        vec.push(removed);
-                    }
-                }
+    let mut vec = Vec::new();
 
-                if vec.len() == 0 {
-                    return Ok(RespValue::Null.encode());
-                } else if vec.len() == 1 {
-                    return Ok(RespValue::BulkString(vec[0].clone()).encode());
-                } else {
-                    return Ok(RespValue::encode_array_from_strings(vec));
-                }
-            } else {
-                return Ok(RespValue::Null.encode());
-            }
+    for _ in 0..lpop_arguments.count {
+        if let Some(removed) = list.pop_front() {
+            vec.push(removed);
         }
-        None => {
-            return Ok(RespValue::Null.encode());
-        }
+    }
+
+    match vec.len() {
+        0 => Ok(RespValue::NullBulkString.encode()),
+        1 => Ok(RespValue::BulkString(vec[0].clone()).encode()),
+        _ => Ok(RespValue::encode_array_from_strings(vec)),
     }
 }

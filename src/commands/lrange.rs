@@ -8,6 +8,34 @@ use crate::{
     resp::RespValue,
 };
 
+struct LrangeArguments {
+    key: String,
+    start_index: isize,
+    end_index: isize,
+}
+
+impl LrangeArguments {
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() != 3 {
+            return Err(CommandError::InvalidLRangeCommand);
+        }
+
+        let Ok(start_index) = arguments[1].parse::<isize>() else {
+            return Err(CommandError::InvalidLRangeCommandArgument);
+        };
+
+        let Ok(end_index) = arguments[2].parse::<isize>() else {
+            return Err(CommandError::InvalidLRangeCommandArgument);
+        };
+
+        Ok(Self {
+            key: arguments[0].clone(),
+            start_index,
+            end_index,
+        })
+    }
+}
+
 /// Handles the Redis LRANGE command.
 ///
 /// Returns a range of elements from a list stored at the given key.
@@ -27,7 +55,7 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // LRANGE mylist 0 2  (get first 3 elements)
 /// let result = lrange(&mut store, vec!["mylist".to_string(), "0".to_string(), "2".to_string()]).await;
 /// // Returns: "*3\r\n$3\r\nval1\r\n$3\r\nval2\r\n$3\r\nval3\r\n"
@@ -40,51 +68,35 @@ pub async fn lrange(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
-    if arguments.len() != 3 {
-        return Err(CommandError::InvalidLRangeCommand);
-    }
-
-    let start_index = match arguments[1].parse::<isize>() {
-        Ok(num) => num,
-        Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
-    };
-
-    let end_index = match arguments[2].parse::<isize>() {
-        Ok(num) => num,
-        Err(_) => return Err(CommandError::InvalidLRangeCommandArgument),
-    };
+    let lrange_arguments = LrangeArguments::parse(arguments)?;
 
     let store_guard = store.lock().await;
-    let stored_data = store_guard.get(&arguments[0]);
 
-    match stored_data {
-        Some(value) => {
-            if let DataType::Array(ref list) = value.data {
-                let (start, end) = if let Ok((start, end)) =
-                    validate_range_indexes(list, start_index, end_index)
-                {
-                    (start, end)
-                } else {
-                    return Ok(RespValue::Array(vec![]).encode());
-                };
+    let Some(value) = store_guard.get(&lrange_arguments.key) else {
+        return Ok(RespValue::Array(Vec::new()).encode());
+    };
 
-                let range = list
-                    .range(start..=end)
-                    .map(|s| s.to_string())
-                    .collect::<Vec<String>>();
+    let DataType::Array(ref list) = value.data else {
+        return Ok(RespValue::Array(Vec::new()).encode());
+    };
 
-                if !range.is_empty() {
-                    return Ok(RespValue::encode_array_from_strings(range));
-                } else {
-                    return Ok(RespValue::Array(vec![]).encode());
-                }
-            } else {
-                return Ok(RespValue::Array(vec![]).encode());
-            }
-        }
-        None => {
-            return Ok(RespValue::Array(vec![]).encode());
-        }
+    let Ok((start, end)) = validate_range_indexes(
+        list,
+        lrange_arguments.start_index,
+        lrange_arguments.end_index,
+    ) else {
+        return Ok(RespValue::Array(Vec::new()).encode());
+    };
+
+    let range = list
+        .range(start..=end)
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
+
+    if !range.is_empty() {
+        return Ok(RespValue::encode_array_from_strings(range));
+    } else {
+        return Ok(RespValue::Array(Vec::new()).encode());
     }
 }
 
@@ -106,7 +118,7 @@ pub async fn lrange(
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// // For a list of length 5:
 /// // validate_range_indexes(&list, 0, 2) -> Ok((0, 2))
 /// // validate_range_indexes(&list, -2, -1) -> Ok((3, 4))
@@ -118,6 +130,10 @@ fn validate_range_indexes(
     end_index: isize,
 ) -> Result<(usize, usize), &str> {
     let len = list.len() as isize;
+
+    if len == 0 {
+        return Err("List is empty");
+    }
 
     let mut start = if start_index < 0 {
         len + start_index
@@ -192,5 +208,11 @@ mod tests {
                 end_index
             );
         }
+
+        // Validation for empty list
+        assert_eq!(
+            validate_range_indexes(&VecDeque::new(), 0, 2),
+            Err("List is empty")
+        );
     }
 }

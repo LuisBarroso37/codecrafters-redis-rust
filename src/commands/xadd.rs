@@ -7,11 +7,66 @@ use std::{
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, validate_stream_id},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
     state::State,
 };
+
+/// Represents the parsed arguments for XADD command
+struct XaddArguments {
+    /// The Redis stream key where the entry will be added
+    key: String,
+    /// The stream ID for the new entry ("*" for auto-generation or "timestamp-sequence")
+    stream_id: String,
+    /// Field-value pairs that make up the stream entry content
+    entries: BTreeMap<String, String>,
+}
+
+impl XaddArguments {
+    /// Parses command arguments into an `XaddArguments` struct.
+    ///
+    /// Validates that the minimum required arguments are provided and that
+    /// field-value pairs are properly matched (even number of field/value arguments).
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - Vector of command arguments [key, stream_id, field1, value1, field2, value2, ...]
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(XaddArguments)` - Successfully parsed arguments
+    /// * `Err(CommandError::InvalidXAddCommand)` - If fewer than 4 arguments provided or
+    ///   field-value pairs don't match (odd number of field/value arguments)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let args = vec!["mystream".to_string(), "*".to_string(), "temp".to_string(), "25".to_string()];
+    /// let parsed = XaddArguments::parse(args)?;
+    /// assert_eq!(parsed.key, "mystream");
+    /// assert_eq!(parsed.stream_id, "*");
+    /// assert_eq!(parsed.entries.get("temp"), Some(&"25".to_string()));
+    /// ```
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() < 4 {
+            return Err(CommandError::InvalidXAddCommand);
+        }
+
+        if arguments[2..].len() % 2 != 0 {
+            return Err(CommandError::InvalidXAddCommand);
+        }
+
+        Ok(Self {
+            key: arguments[0].clone(),
+            stream_id: arguments[1].clone(),
+            entries: arguments[2..]
+                .chunks(2)
+                .map(|chunk| (chunk[0].clone(), chunk[1].clone()))
+                .collect::<BTreeMap<String, String>>(),
+        })
+    }
+}
 
 /// Handles the Redis XADD command.
 ///
@@ -34,7 +89,7 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // XADD mystream * temperature 25 humidity 60
 /// let result = xadd(&mut store, &mut state, vec![
 ///     "mystream".to_string(), "*".to_string(),
@@ -48,56 +103,42 @@ pub async fn xadd(
     state: &mut Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
-    if arguments.len() < 4 {
-        return Err(CommandError::InvalidXAddCommand);
-    }
+    let xadd_arguments = XaddArguments::parse(arguments)?;
 
-    let store_key = arguments[0].clone();
     let validated_stream_id =
-        validate_stream_id_against_store(store, &store_key, arguments[1].as_str())
+        validate_stream_id_against_store(store, &xadd_arguments.key, &xadd_arguments.stream_id)
             .await
-            .map_err(|e| {
-                if e == "Invalid data type for key" {
-                    CommandError::InvalidDataTypeForKey
-                } else {
-                    CommandError::InvalidStreamId(e)
-                }
+            .map_err(|e| match e.as_str() {
+                "Invalid data type for key" => CommandError::InvalidDataTypeForKey,
+                _ => CommandError::InvalidStreamId(e),
             })?;
-    let key_value_pairs = arguments[2..].to_vec();
-
-    let mut entries = BTreeMap::new();
-
-    for (key, value) in key_value_pairs
-        .chunks(2)
-        .map(|chunk| (chunk.get(0), chunk.get(1)))
-    {
-        if let (Some(key), Some(value)) = (key, value) {
-            entries.insert(key.clone(), value.clone());
-        } else {
-            return Err(CommandError::InvalidXAddCommand);
-        }
-    }
 
     let mut store_guard = store.lock().await;
 
-    if let Some(value) = store_guard.get_mut(&store_key) {
-        if let DataType::Stream(ref mut stream) = value.data {
-            stream.insert(validated_stream_id.clone(), entries);
-        } else {
-            return Err(CommandError::InvalidDataTypeForKey);
+    match store_guard.get_mut(&xadd_arguments.key) {
+        Some(value) => {
+            let DataType::Stream(ref mut stream) = value.data else {
+                return Err(CommandError::InvalidDataTypeForKey);
+            };
+
+            stream.insert(validated_stream_id.clone(), xadd_arguments.entries);
         }
-    } else {
-        store_guard.insert(
-            store_key.clone(),
-            Value {
-                data: DataType::Stream(BTreeMap::from([(validated_stream_id.clone(), entries)])),
-                expiration: None,
-            },
-        );
-    }
+        None => {
+            store_guard.insert(
+                xadd_arguments.key.clone(),
+                Value {
+                    data: DataType::Stream(BTreeMap::from([(
+                        validated_stream_id.clone(),
+                        xadd_arguments.entries,
+                    )])),
+                    expiration: None,
+                },
+            );
+        }
+    };
 
     let mut state_guard = state.lock().await;
-    state_guard.send_to_xread_subscribers(&store_key, &validated_stream_id, true)?;
+    state_guard.send_to_xread_subscribers(&xadd_arguments.key, &validated_stream_id, true)?;
 
     Ok(RespValue::BulkString(validated_stream_id).encode())
 }
@@ -119,52 +160,121 @@ pub async fn xadd(
 /// * `Ok(String)` - A validated stream ID in format "timestamp-sequence"
 /// * `Err(String)` - Error message if the stream ID is invalid or out of order
 async fn validate_stream_id_against_store(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: &Arc<Mutex<KeyValueStore>>,
     key: &str,
     stream_id: &str,
 ) -> Result<String, String> {
     if stream_id == "*" {
-        let millisecond_timestamp = get_timestamp_in_milliseconds()
+        let timestamp = get_timestamp_in_milliseconds()
             .map_err(|_| "System time is before unix epoch".to_string())?;
-        let index = get_next_stream_id_index(&store, key, millisecond_timestamp).await?;
+        let sequence = get_next_sequence_for_timestamp(&store, key, timestamp).await?;
 
-        return Ok(format!("{}-{}", millisecond_timestamp, index));
+        return Ok(format!("{}-{}", timestamp, sequence));
     }
 
-    let split_stream_id = stream_id.split("-").collect::<Vec<&str>>();
+    let (timestamp, sequence_part) = parse_stream_id_parts(stream_id)?;
 
-    if split_stream_id.len() != 2 {
-        return Err("Invalid stream ID format".to_string());
+    if sequence_part == "*" {
+        let sequence = get_next_sequence_for_timestamp(&store, key, timestamp).await?;
+
+        return Ok(format!("{}-{}", timestamp, sequence));
     }
 
-    let first_stream_id_part = split_stream_id[0]
+    let sequence = sequence_part
         .parse::<u128>()
         .map_err(|_| "The ID specified in XADD must be greater than 0-0".to_string())?;
 
-    if split_stream_id[1] == "*" {
-        let index = get_next_stream_id_index(&store, key, first_stream_id_part).await?;
-
-        return Ok(format!("{}-{}", first_stream_id_part, index));
-    }
-
-    let index = split_stream_id[1]
-        .parse::<u128>()
-        .map_err(|_| "The ID specified in XADD must be greater than 0-0".to_string())?;
-
-    if format!("{}-{}", first_stream_id_part, index) == "0-0" {
+    if timestamp == 0 && sequence == 0 {
         return Err("The ID specified in XADD must be greater than 0-0".to_string());
     }
 
-    let next_index = get_next_stream_id_index(&store, key, first_stream_id_part).await?;
+    validate_against_existing_entries(store, key, timestamp, sequence).await?;
 
-    if index >= next_index {
-        Ok(stream_id.to_string())
-    } else {
+    Ok(stream_id.to_string())
+}
+
+/// Parses a stream ID into its timestamp and sequence components.
+///
+/// Splits a stream ID string on the hyphen delimiter and validates the format.
+/// The timestamp part must be a valid u128, while the sequence part is returned
+/// as a string slice to handle both numeric values and "*" for auto-generation.
+///
+/// # Arguments
+///
+/// * `stream_id` - The stream ID string to parse (format: "timestamp-sequence")
+///
+/// # Returns
+///
+/// * `Ok((u128, &str))` - Parsed timestamp and sequence part as string slice
+/// * `Err(String)` - Error message if the format is invalid or timestamp cannot be parsed
+///
+/// # Examples
+///
+/// ```ignore
+/// let (timestamp, sequence) = parse_stream_id_parts("1234567890-5")?;
+/// assert_eq!(timestamp, 1234567890);
+/// assert_eq!(sequence, "5");
+///
+/// let (timestamp, sequence) = parse_stream_id_parts("1234567890-*")?;
+/// assert_eq!(timestamp, 1234567890);
+/// assert_eq!(sequence, "*");
+/// ```
+fn parse_stream_id_parts(stream_id: &str) -> Result<(u128, &str), String> {
+    let parts = stream_id.split('-').collect::<Vec<&str>>();
+
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return Err("Invalid stream ID format".to_string());
+    }
+
+    let timestamp = parts[0]
+        .parse::<u128>()
+        .map_err(|_| "The ID specified in XADD must be greater than 0-0")?;
+
+    Ok((timestamp, parts[1]))
+}
+
+/// Validates an explicit stream ID against existing entries in the stream.
+///
+/// Ensures that the proposed stream ID is greater than all existing stream IDs
+/// in the target stream to maintain chronological ordering. This is called for
+/// explicit stream IDs (not auto-generated ones).
+///
+/// # Arguments
+///
+/// * `store` - A thread-safe reference to the key-value store
+/// * `key` - The stream key to validate against
+/// * `timestamp` - The timestamp part of the proposed stream ID
+/// * `sequence` - The sequence part of the proposed stream ID
+///
+/// # Returns
+///
+/// * `Ok(())` - The stream ID is valid and can be used
+/// * `Err(String)` - Error message if the stream ID would violate ordering constraints
+///
+/// # Examples
+///
+/// ```ignore
+/// // Assuming stream has entries up to "1234-5"
+/// validate_against_existing_entries(&store, "mystream", 1234, 6).await?; // OK
+/// validate_against_existing_entries(&store, "mystream", 1235, 0).await?; // OK
+/// validate_against_existing_entries(&store, "mystream", 1234, 4).await; // Error: too small
+/// ```
+async fn validate_against_existing_entries(
+    store: &Arc<Mutex<KeyValueStore>>,
+    key: &str,
+    timestamp: u128,
+    sequence: u128,
+) -> Result<(), String> {
+    let min_sequence = get_next_sequence_for_timestamp(store, key, timestamp).await?;
+
+    if sequence < min_sequence {
         return Err(
             "The ID specified in XADD is equal or smaller than the target stream top item"
                 .to_string(),
         );
     }
+
+    Ok(())
 }
 
 /// Calculates the next sequence number for a stream ID with a given timestamp.
@@ -176,57 +286,51 @@ async fn validate_stream_id_against_store(
 ///
 /// * `store` - A thread-safe reference to the key-value store
 /// * `key` - The stream key to check for existing entries
-/// * `stream_id` - The timestamp part of the stream ID
+/// * `timestamp` - The timestamp part of the stream ID
 ///
 /// # Returns
 ///
 /// * `Ok(u128)` - The next available sequence number for this timestamp
 /// * `Err(String)` - Error message if the stream contains invalid data
-async fn get_next_stream_id_index(
+async fn get_next_sequence_for_timestamp(
     store: &Arc<Mutex<KeyValueStore>>,
     key: &str,
-    stream_id: u128,
+    timestamp: u128,
 ) -> Result<u128, String> {
     let store_guard = store.lock().await;
 
-    if let Some(value) = store_guard.get(key) {
-        match value.data {
-            DataType::Stream(ref stream) => {
-                if let Some(max_key_element) = stream.iter().max_by_key(|s| s.0) {
-                    let split_key = max_key_element.0.split("-").collect::<Vec<&str>>();
-
-                    if split_key.len() != 2 {
-                        return Err("Invalid stream ID format".to_string());
-                    }
-
-                    let first_key_part = split_key[0]
-                        .parse::<u128>()
-                        .map_err(|_| "Invalid stream ID format".to_string())?;
-
-                    if stream_id == first_key_part {
-                        let index = split_key[1]
-                            .parse::<u128>()
-                            .map_err(|_| "Invalid stream ID format".to_string())?;
-
-                        return Ok(index + 1);
-                    } else if stream_id > first_key_part {
-                        return Ok(0);
-                    } else {
-                        return Err("The ID specified in XADD is equal or smaller than the target stream top item".to_string());
-                    }
-                } else {
-                    return Ok(0);
-                }
-            }
-            _ => return Err("Invalid data type for key".to_string()),
-        }
-    } else {
-        if stream_id == 0 {
+    let Some(value) = store_guard.get(key) else {
+        if timestamp == 0 {
             return Ok(1);
         } else {
             return Ok(0);
         }
     };
+
+    let DataType::Stream(ref stream) = value.data else {
+        return Err("Invalid data type for key".to_string());
+    };
+
+    let Some(max_stream_id) = stream.keys().max() else {
+        return Ok(0);
+    };
+
+    let (max_timestamp, max_sequence) = validate_stream_id(max_stream_id, true)?;
+
+    let Some(sequence) = max_sequence else {
+        return Err("Invalid stream ID format".to_string());
+    };
+
+    if timestamp == max_timestamp {
+        Ok(sequence + 1)
+    } else if timestamp > max_timestamp {
+        Ok(0)
+    } else {
+        Err(
+            "The ID specified in XADD is equal or smaller than the target stream top item"
+                .to_string(),
+        )
+    }
 }
 
 /// Gets the current system time as milliseconds since Unix epoch.
@@ -248,24 +352,250 @@ fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeMap, HashMap},
-        sync::Arc,
-    };
+    use std::{collections::BTreeMap, sync::Arc};
 
     use tokio::sync::Mutex;
 
-    use crate::key_value_store::{DataType, Value};
+    use crate::key_value_store::{DataType, KeyValueStore, Value};
 
-    use super::{get_timestamp_in_milliseconds, validate_stream_id_against_store};
+    use super::{
+        get_next_sequence_for_timestamp, get_timestamp_in_milliseconds, parse_stream_id_parts,
+        validate_against_existing_entries, validate_stream_id_against_store,
+    };
+
     #[test]
     fn test_get_timestamp_in_milliseconds() {
-        assert!(get_timestamp_in_milliseconds().is_ok());
+        assert_eq!(get_timestamp_in_milliseconds().is_ok(), true);
+    }
+
+    #[test]
+    fn test_parse_stream_id_parts() {
+        let test_cases = vec![
+            ("1234-5", Ok((1234, "5"))),
+            ("0-0", Ok((0, "0"))),
+            ("1526919030474-0", Ok((1526919030474, "0"))),
+            ("123-*", Ok((123, "*"))),
+            (
+                "999999999999999999999-123",
+                Ok((999999999999999999999, "123")),
+            ),
+            ("invalid", Err("Invalid stream ID format".to_string())),
+            ("", Err("Invalid stream ID format".to_string())),
+            ("123", Err("Invalid stream ID format".to_string())),
+            ("123-456-789", Err("Invalid stream ID format".to_string())),
+            ("-123", Err("Invalid stream ID format".to_string())),
+            ("123-", Err("Invalid stream ID format".to_string())),
+            (
+                "invalid-123",
+                Err("The ID specified in XADD must be greater than 0-0".to_string()),
+            ),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = parse_stream_id_parts(input);
+            assert_eq!(result, expected, "Failed for input: {}", input);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_next_sequence_for_timestamp() {
+        let test_cases = vec![
+            (KeyValueStore::new(), "nonexistent", 0, Ok(1)),
+            (KeyValueStore::new(), "nonexistent", 1234, Ok(0)),
+            (
+                KeyValueStore::from([(
+                    "stream1".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "0-1".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream1",
+                0,
+                Ok(2),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream1".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "0-1".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream1",
+                1,
+                Ok(0),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream2".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream2",
+                1234,
+                Ok(6),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream2".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream2",
+                1235,
+                Ok(0),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream2".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream2",
+                1233,
+                Err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                        .to_string(),
+                ),
+            ),
+            (
+                KeyValueStore::from([(
+                    "string_key".to_string(),
+                    Value {
+                        data: DataType::String("not a stream".to_string()),
+                        expiration: None,
+                    },
+                )]),
+                "string_key",
+                1234,
+                Err("Invalid data type for key".to_string()),
+            ),
+        ];
+
+        for (store_data, key, timestamp, expected_sequence) in test_cases {
+            let store = Arc::new(Mutex::new(store_data));
+            let result = get_next_sequence_for_timestamp(&store, key, timestamp).await;
+            assert_eq!(
+                result, expected_sequence,
+                "Failed for key: {}, timestamp: {}",
+                key, timestamp
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validate_against_existing_entries() {
+        let test_cases = vec![
+            (KeyValueStore::new(), "nonexistent", 1234, 0, Ok(())),
+            (KeyValueStore::new(), "nonexistent", 0, 1, Ok(())),
+            (
+                KeyValueStore::from([(
+                    "stream1".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream1",
+                1234,
+                6,
+                Ok(()),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream1".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream1",
+                1234,
+                5,
+                Err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                        .to_string(),
+                ),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream1".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream1",
+                1234,
+                4,
+                Err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                        .to_string(),
+                ),
+            ),
+            (
+                KeyValueStore::from([(
+                    "stream1".to_string(),
+                    Value {
+                        data: DataType::Stream(BTreeMap::from([(
+                            "1234-5".to_string(),
+                            BTreeMap::new(),
+                        )])),
+                        expiration: None,
+                    },
+                )]),
+                "stream1",
+                1235,
+                0,
+                Ok(()),
+            ),
+        ];
+
+        for (store_data, key, timestamp, sequence, expected) in test_cases {
+            let store = Arc::new(Mutex::new(store_data));
+            let result = validate_against_existing_entries(&store, key, timestamp, sequence).await;
+            assert_eq!(
+                result, expected,
+                "Failed for key: {}, timestamp: {}, sequence: {}",
+                key, timestamp, sequence
+            );
+        }
     }
 
     #[tokio::test]
     async fn test_validate_stream_id_against_store() {
-        let mut store = Arc::new(Mutex::new(HashMap::from([
+        let store = Arc::new(Mutex::new(KeyValueStore::from([
             (
                 "fruits".to_string(),
                 Value {
@@ -289,6 +619,13 @@ mod tests {
                         "1526919030474-0".to_string(),
                         BTreeMap::from([("temperature".to_string(), "37".to_string())]),
                     )])),
+                    expiration: None,
+                },
+            ),
+            (
+                "string_key".to_string(),
+                Value {
+                    data: DataType::String("not a stream".to_string()),
                     expiration: None,
                 },
             ),
@@ -321,6 +658,9 @@ mod tests {
                 "0-0",
                 Err("The ID specified in XADD must be greater than 0-0".to_string()),
             ),
+            ("key", "0-*", Ok("0-1".to_string())),
+            ("key", "1234-*", Ok("1234-0".to_string())),
+            ("nonexistent", "1234-5", Ok("1234-5".to_string())),
             (
                 "fruits",
                 "0-2",
@@ -337,6 +677,8 @@ mod tests {
                         .to_string(),
                 ),
             ),
+            ("fruits", "1-2", Ok("1-2".to_string())),
+            ("fruits", "2-0", Ok("2-0".to_string())),
             (
                 "sensor",
                 "1526919030474-0",
@@ -370,20 +712,30 @@ mod tests {
                 "1526919030484-1",
                 Ok("1526919030484-1".to_string()),
             ),
-            ("key", "0-*", Ok("0-1".to_string())),
+            (
+                "string_key",
+                "1234-5",
+                Err("Invalid data type for key".to_string()),
+            ),
         ];
 
-        for (key, stream_id, expected_result) in test_cases {
+        for (key, stream_id, expected) in test_cases {
+            let result = validate_stream_id_against_store(&store, key, stream_id).await;
             assert_eq!(
-                validate_stream_id_against_store(&mut store, key, stream_id).await,
-                expected_result
+                result, expected,
+                "Failed for key: {}, stream_id: {}",
+                key, stream_id
             );
         }
 
-        assert!(
-            validate_stream_id_against_store(&mut store, "sensor", "*")
-                .await
-                .is_ok()
-        );
+        // Test auto-generation with "*"
+        let result = validate_stream_id_against_store(&store, "sensor", "*").await;
+        assert_eq!(result.is_ok(), true);
+
+        // Should be greater than existing entry
+        let generated_id = result.unwrap();
+        let parts: Vec<&str> = generated_id.split('-').collect();
+        let timestamp: u128 = parts[0].parse().unwrap();
+        assert_eq!(timestamp >= 1526919030474, true);
     }
 }

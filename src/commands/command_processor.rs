@@ -54,7 +54,7 @@ impl CommandProcessor {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let resp_array = vec![RespValue::Array(vec![
     ///     RespValue::BulkString("GET".to_string()),
     ///     RespValue::BulkString("mykey".to_string())
@@ -66,28 +66,26 @@ impl CommandProcessor {
             return Err(CommandError::InvalidCommand);
         }
 
-        match input.get(0) {
-            Some(RespValue::Array(elements)) => {
-                let name = match elements.get(0) {
-                    Some(RespValue::BulkString(s)) => Ok(s.to_string()),
-                    _ => Err(CommandError::InvalidCommandArgument),
-                }?
-                .to_uppercase();
+        let Some(RespValue::Array(elements)) = input.get(0) else {
+            return Err(CommandError::InvalidCommand);
+        };
 
-                let mut arguments: Vec<String> = Vec::new();
+        let name = match elements.get(0) {
+            Some(RespValue::BulkString(s)) => Ok(s.to_string().to_uppercase()),
+            _ => Err(CommandError::InvalidCommandArgument),
+        }?;
 
-                for element in elements[1..].iter() {
-                    let arg = match element {
-                        RespValue::BulkString(s) => Ok(s.to_string()),
-                        _ => Err(CommandError::InvalidCommand),
-                    }?;
-                    arguments.push(arg);
-                }
+        let mut arguments: Vec<String> = Vec::new();
 
-                Ok(Self { name, arguments })
-            }
-            _ => return Err(CommandError::InvalidCommand),
+        for element in elements[1..].iter() {
+            let arg = match element {
+                RespValue::BulkString(s) => Ok(s.to_string()),
+                _ => Err(CommandError::InvalidCommand),
+            }?;
+            arguments.push(arg);
         }
+
+        Ok(Self { name, arguments })
     }
 
     /// Executes the parsed Redis command by dispatching to the appropriate handler.

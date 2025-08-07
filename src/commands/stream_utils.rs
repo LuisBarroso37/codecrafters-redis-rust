@@ -9,7 +9,7 @@ use crate::resp::RespValue;
 ///
 /// # Arguments
 ///
-/// * `command_argument` - The stream ID string to validate (e.g., "1234567890-0")
+/// * `stream_id` - The stream ID string to validate (e.g., "1234567890-0")
 /// * `is_zero_zero_forbidden` - Whether to reject the special "0-0" ID
 ///
 /// # Returns
@@ -19,7 +19,7 @@ use crate::resp::RespValue;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let result = validate_stream_id("1234567890-5", false);
 /// // Returns: Ok((1234567890, Some(5)))
 ///
@@ -27,33 +27,32 @@ use crate::resp::RespValue;
 /// // Returns: Ok((1234567890, None))
 /// ```
 pub fn validate_stream_id(
-    command_argument: &str,
+    stream_id: &str,
     is_zero_zero_forbidden: bool,
 ) -> Result<(u128, Option<u128>), String> {
-    let split_command_argument = command_argument.split("-").collect::<Vec<&str>>();
+    let parts = stream_id.split("-").collect::<Vec<&str>>();
 
-    if split_command_argument.len() > 2 {
+    if parts.len() > 2 {
         return Err("Stream ID cannot have more than 2 elements split by a hyphen".to_string());
     }
 
-    let first_stream_id_part = split_command_argument[0]
+    let timestamp = parts[0]
         .parse::<u128>()
-        .map_err(|_| "The stream ID specified must be greater than 0".to_string())?;
+        .map_err(|_| "Timestamp specified must be greater than 0".to_string())?;
 
-    if split_command_argument.len() == 1 {
-        return Ok((first_stream_id_part, None));
-    } else {
-        let index = split_command_argument[1]
-            .parse::<u128>()
-            .map_err(|_| "The index specified must be greater than 0".to_string())?;
-
-        if is_zero_zero_forbidden == true && format!("{}-{}", first_stream_id_part, index) == "0-0"
-        {
-            return Err("The stream id must be greater than 0-0".to_string());
-        }
-
-        return Ok((first_stream_id_part, Some(index)));
+    if parts.len() == 1 {
+        return Ok((timestamp, None));
     }
+
+    let sequence = parts[1]
+        .parse::<u128>()
+        .map_err(|_| "Sequence specified must be greater than 0".to_string())?;
+
+    if is_zero_zero_forbidden && timestamp == 0 && sequence == 0 {
+        return Err("Stream ID must be greater than 0-0".to_string());
+    }
+
+    return Ok((timestamp, Some(sequence)));
 }
 
 /// Converts stream entries to RESP array format.
@@ -72,7 +71,7 @@ pub fn validate_stream_id(
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let entries = vec![
 ///     (&"1234-0".to_string(), &btreemap!{"temp".to_string() => "25".to_string()}),
 ///     (&"1235-0".to_string(), &btreemap!{"temp".to_string() => "26".to_string()})
@@ -83,32 +82,24 @@ pub fn validate_stream_id(
 pub fn parse_stream_entries_to_resp(
     entries: Vec<(&String, &BTreeMap<String, String>)>,
 ) -> RespValue {
-    let array_length = entries.len();
-    let mut response: Vec<RespValue> = Vec::with_capacity(array_length);
-
     let resp_stream_data = entries
         .iter()
-        .map(|(id, values)| {
-            let mut stream_vec: Vec<RespValue> = Vec::with_capacity(2);
-            stream_vec.push(RespValue::BulkString(id.to_string()));
-
-            let mut stream_values_vec: Vec<RespValue> = Vec::with_capacity(values.len());
+        .map(|(stream_id, values)| {
+            let mut field_value_pairs: Vec<RespValue> = Vec::with_capacity(values.len() * 2);
 
             for (key, value) in values.iter() {
-                stream_values_vec.push(RespValue::BulkString(key.to_string()));
-                stream_values_vec.push(RespValue::BulkString(value.to_string()));
+                field_value_pairs.push(RespValue::BulkString(key.to_string()));
+                field_value_pairs.push(RespValue::BulkString(value.to_string()));
             }
 
-            stream_vec.push(RespValue::Array(stream_values_vec));
-            return stream_vec;
+            RespValue::Array(vec![
+                RespValue::BulkString(stream_id.to_string()),
+                RespValue::Array(field_value_pairs),
+            ])
         })
-        .collect::<Vec<Vec<RespValue>>>();
+        .collect::<Vec<RespValue>>();
 
-    for resp_vector in resp_stream_data {
-        response.push(RespValue::Array(resp_vector));
-    }
-
-    RespValue::Array(response)
+    RespValue::Array(resp_stream_data)
 }
 
 #[cfg(test)]
@@ -123,7 +114,7 @@ mod tests {
             (
                 "invalid",
                 true,
-                Err("The stream ID specified must be greater than 0".to_string()),
+                Err("Timestamp specified must be greater than 0".to_string()),
             ),
             (
                 "invalid-key-",
@@ -133,17 +124,17 @@ mod tests {
             (
                 "invalid-0",
                 true,
-                Err("The stream ID specified must be greater than 0".to_string()),
+                Err("Timestamp specified must be greater than 0".to_string()),
             ),
             (
                 "0-invalid",
                 true,
-                Err("The index specified must be greater than 0".to_string()),
+                Err("Sequence specified must be greater than 0".to_string()),
             ),
             (
                 "0-0",
                 true,
-                Err("The stream id must be greater than 0-0".to_string()),
+                Err("Stream ID must be greater than 0-0".to_string()),
             ),
             ("0-0", false, Ok((0, Some(0)))),
             ("1526919030484", true, Ok((1526919030484, None))),

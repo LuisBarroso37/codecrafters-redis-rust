@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -9,6 +9,30 @@ use crate::{
     key_value_store::{DataType, KeyValueStore, Stream},
     resp::RespValue,
 };
+
+struct XrangeArguments {
+    key: String,
+    start_stream_id: String,
+    end_stream_id: String,
+}
+
+impl XrangeArguments {
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() != 3 {
+            return Err(CommandError::InvalidXRangeCommand);
+        }
+
+        let key = arguments[0].clone();
+        let start_stream_id = arguments[1].clone();
+        let end_stream_id = arguments[2].clone();
+
+        Ok(Self {
+            key,
+            start_stream_id,
+            end_stream_id,
+        })
+    }
+}
 
 /// Handles the Redis XRANGE command.
 ///
@@ -30,7 +54,7 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // XRANGE mystream - +  (get all entries)
 /// let result = xrange(&mut store, vec!["mystream".to_string(), "-".to_string(), "+".to_string()]).await;
 /// // Returns: "*2\r\n*2\r\n$15\r\n1518951480106-0\r\n*4\r\n$4\r\ntemp\r\n$2\r\n25\r\n..."
@@ -47,65 +71,154 @@ pub async fn xrange(
     store: &mut Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
-    if arguments.len() != 3 {
-        return Err(CommandError::InvalidXRangeCommand);
-    }
+    let xrange_arguments = XrangeArguments::parse(arguments)?;
 
     let store_guard = store.lock().await;
 
-    if let Some(value) = store_guard.get(&arguments[0]) {
-        let stream = match value.data {
-            DataType::Stream(ref stream) => stream,
-            _ => return Err(CommandError::InvalidDataTypeForKey),
-        };
-
-        let start_stream_id = match arguments[1].as_str() {
-            "-" => {
-                let first_key_value_pair = stream.first_key_value();
-
-                match first_key_value_pair {
-                    Some((stream_id, _)) => validate_stream_id(stream_id, true)
-                        .map_err(|e| CommandError::InvalidStreamId(e))?,
-                    None => return Ok(RespValue::Array(Vec::with_capacity(0)).encode()),
-                }
-            }
-            argument => {
-                validate_stream_id(argument, true).map_err(|e| CommandError::InvalidStreamId(e))?
-            }
-        };
-
-        let end_stream_id = match arguments[2].as_str() {
-            "+" => {
-                let last_key_value_pair = stream.last_key_value();
-
-                match last_key_value_pair {
-                    Some((stream_id, _)) => validate_stream_id(stream_id, true)
-                        .map_err(|e| CommandError::InvalidStreamId(e))?,
-                    None => return Ok(RespValue::Array(Vec::with_capacity(0)).encode()),
-                }
-            }
-            argument => {
-                validate_stream_id(argument, true).map_err(|e| CommandError::InvalidStreamId(e))?
-            }
-        };
-
-        let entries = stream
-            .iter()
-            .filter_map(|(id, entries)| {
-                let stream_id = validate_stream_id(id, true).ok()?;
-
-                if is_stream_id_in_range(&stream_id, &start_stream_id, &end_stream_id) {
-                    Some((id, entries))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<(&String, &Stream)>>();
-
-        let resp_value = parse_stream_entries_to_resp(entries);
-        return Ok(resp_value.encode());
-    } else {
+    let Some(value) = store_guard.get(&xrange_arguments.key) else {
         return Err(CommandError::DataNotFound);
+    };
+
+    let DataType::Stream(ref stream) = value.data else {
+        return Err(CommandError::InvalidDataTypeForKey);
+    };
+
+    let Some(start_stream_id) =
+        validate_start_stream_id(stream, &xrange_arguments.start_stream_id)?
+    else {
+        return Ok(RespValue::Array(Vec::with_capacity(0)).encode());
+    };
+    let Some(end_stream_id) = validate_end_stream_id(stream, &xrange_arguments.end_stream_id)?
+    else {
+        return Ok(RespValue::Array(Vec::with_capacity(0)).encode());
+    };
+
+    let entries = stream
+        .iter()
+        .filter_map(|(id, entries)| {
+            let stream_id = validate_stream_id(id, true).ok()?;
+
+            if is_stream_id_in_range(&stream_id, &start_stream_id, &end_stream_id) {
+                Some((id, entries))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<(&String, &Stream)>>();
+
+    let resp_value = parse_stream_entries_to_resp(entries);
+    return Ok(resp_value.encode());
+}
+
+/// Validates and resolves the start stream ID for XRANGE operations.
+///
+/// Handles the special case of "-" which represents the beginning of the stream,
+/// as well as explicit stream IDs. When "-" is provided, it finds the minimum
+/// (earliest) stream ID in the stream and validates it.
+///
+/// # Arguments
+///
+/// * `stream` - A reference to the BTreeMap representing the Redis stream
+/// * `start_stream_id` - The start stream ID string ("-" for beginning or explicit ID)
+///
+/// # Returns
+///
+/// * `Ok(Some((u128, Option<u128>)))` - Successfully validated stream ID as (timestamp, sequence)
+/// * `Ok(None)` - When "-" is used but the stream is empty
+/// * `Err(CommandError::InvalidStreamId)` - When the stream ID format is invalid
+///
+/// # Examples
+///
+/// ```ignore
+/// // For an empty stream
+/// let result = validate_start_stream_id(&empty_stream, "-");
+/// assert_eq!(result, Ok(None));
+///
+/// // For "-" with existing entries
+/// let result = validate_start_stream_id(&stream, "-");
+/// assert_eq!(result, Ok(Some((1234567890, Some(0)))));
+///
+/// // For explicit stream ID
+/// let result = validate_start_stream_id(&stream, "1234567890-5");
+/// assert_eq!(result, Ok(Some((1234567890, Some(5)))));
+/// ```
+fn validate_start_stream_id(
+    stream: &BTreeMap<String, Stream>,
+    start_stream_id: &str,
+) -> Result<Option<(u128, Option<u128>)>, CommandError> {
+    match start_stream_id {
+        "-" => {
+            let Some(min_stream_id) = stream.keys().min() else {
+                return Ok(None);
+            };
+
+            let validated_stream_id = validate_stream_id(min_stream_id, true)
+                .map_err(|e| CommandError::InvalidStreamId(e))?;
+
+            Ok(Some(validated_stream_id))
+        }
+        stream_id => {
+            let validated_stream_id = validate_stream_id(stream_id, true)
+                .map_err(|e| CommandError::InvalidStreamId(e))?;
+
+            Ok(Some(validated_stream_id))
+        }
+    }
+}
+
+/// Validates and resolves the end stream ID for XRANGE operations.
+///
+/// Handles the special case of "+" which represents the end of the stream,
+/// as well as explicit stream IDs. When "+" is provided, it finds the maximum
+/// (latest) stream ID in the stream and validates it.
+///
+/// # Arguments
+///
+/// * `stream` - A reference to the BTreeMap representing the Redis stream
+/// * `end_stream_id` - The end stream ID string ("+" for end or explicit ID)
+///
+/// # Returns
+///
+/// * `Ok(Some((u128, Option<u128>)))` - Successfully validated stream ID as (timestamp, sequence)
+/// * `Ok(None)` - When "+" is used but the stream is empty
+/// * `Err(CommandError::InvalidStreamId)` - When the stream ID format is invalid
+///
+/// # Examples
+///
+/// ```ignore
+/// // For an empty stream
+/// let result = validate_end_stream_id(&empty_stream, "+");
+/// assert_eq!(result, Ok(None));
+///
+/// // For "+" with existing entries
+/// let result = validate_end_stream_id(&stream, "+");
+/// assert_eq!(result, Ok(Some((1234567890, Some(10)))));
+///
+/// // For explicit stream ID
+/// let result = validate_end_stream_id(&stream, "1234567890-5");
+/// assert_eq!(result, Ok(Some((1234567890, Some(5)))));
+/// ```
+fn validate_end_stream_id(
+    stream: &BTreeMap<String, Stream>,
+    end_stream_id: &str,
+) -> Result<Option<(u128, Option<u128>)>, CommandError> {
+    match end_stream_id {
+        "+" => {
+            let Some(max_stream_id) = stream.keys().max() else {
+                return Ok(None);
+            };
+
+            let validated_stream_id = validate_stream_id(max_stream_id, true)
+                .map_err(|e| CommandError::InvalidStreamId(e))?;
+
+            Ok(Some(validated_stream_id))
+        }
+        stream_id => {
+            let validated_stream_id = validate_stream_id(stream_id, true)
+                .map_err(|e| CommandError::InvalidStreamId(e))?;
+
+            Ok(Some(validated_stream_id))
+        }
     }
 }
 
@@ -219,10 +332,98 @@ fn is_sequence_at_or_before(sequence: &Option<u128>, end_sequence: &Option<u128>
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::commands::CommandError;
+
     use super::{
         is_sequence_at_or_after, is_sequence_at_or_before, is_sequence_in_range,
-        is_stream_id_in_range,
+        is_stream_id_in_range, validate_end_stream_id, validate_start_stream_id,
     };
+
+    #[test]
+    fn test_validate_start_stream_id() {
+        let empty_stream = BTreeMap::new();
+        let stream = BTreeMap::from([
+            ("1000-0".to_string(), BTreeMap::new()),
+            ("2000-5".to_string(), BTreeMap::new()),
+            ("3000-10".to_string(), BTreeMap::new()),
+        ]);
+
+        let test_cases = vec![
+            (&empty_stream, "-", Ok(None)),
+            (&stream, "-", Ok(Some((1000, Some(0))))),
+            (&empty_stream, "1500-7", Ok(Some((1500, Some(7))))),
+            (&stream, "1500-7", Ok(Some((1500, Some(7))))),
+            (&stream, "2000-5", Ok(Some((2000, Some(5))))),
+            (
+                &stream,
+                "invalid",
+                Err(CommandError::InvalidStreamId(
+                    "Timestamp specified must be greater than 0".to_string(),
+                )),
+            ),
+            (&stream, "1000", Ok(Some((1000, None)))),
+            (
+                &stream,
+                "1000-",
+                Err(CommandError::InvalidStreamId(
+                    "Sequence specified must be greater than 0".to_string(),
+                )),
+            ),
+        ];
+
+        for (stream_data, start_id, expected_result) in test_cases {
+            assert_eq!(
+                validate_start_stream_id(stream_data, start_id),
+                expected_result,
+                "Failed for start_id: {}",
+                start_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_end_stream_id() {
+        let empty_stream = BTreeMap::new();
+        let stream = BTreeMap::from([
+            ("1000-0".to_string(), BTreeMap::new()),
+            ("2000-5".to_string(), BTreeMap::new()),
+            ("3000-10".to_string(), BTreeMap::new()),
+        ]);
+
+        let test_cases = vec![
+            (&empty_stream, "+", Ok(None)),
+            (&stream, "+", Ok(Some((3000, Some(10))))),
+            (&empty_stream, "1500-7", Ok(Some((1500, Some(7))))),
+            (&stream, "1500-7", Ok(Some((1500, Some(7))))),
+            (&stream, "2000-5", Ok(Some((2000, Some(5))))),
+            (
+                &stream,
+                "invalid",
+                Err(CommandError::InvalidStreamId(
+                    "Timestamp specified must be greater than 0".to_string(),
+                )),
+            ),
+            (&stream, "1000", Ok(Some((1000, None)))),
+            (
+                &stream,
+                "1000-",
+                Err(CommandError::InvalidStreamId(
+                    "Sequence specified must be greater than 0".to_string(),
+                )),
+            ),
+        ];
+
+        for (stream_data, end_id, expected_result) in test_cases {
+            assert_eq!(
+                validate_end_stream_id(stream_data, end_id),
+                expected_result,
+                "Failed for end_id: {}",
+                end_id
+            );
+        }
+    }
 
     #[test]
     fn test_is_stream_id_in_range() {

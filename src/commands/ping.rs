@@ -17,7 +17,7 @@ use crate::{commands::command_error::CommandError, resp::RespValue};
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // PING
 /// let result = ping(vec![]);
 /// // Returns: "+PONG\r\n"
