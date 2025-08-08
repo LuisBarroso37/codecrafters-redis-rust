@@ -30,7 +30,7 @@ async fn test_handle_incr_command() {
     env.exec_command_ok(
         TestUtils::incr_command("grape"),
         &TestUtils::server_addr(41845),
-        &&TestUtils::expected_integer(6),
+        &TestUtils::expected_integer(6),
     )
     .await;
 
@@ -78,7 +78,7 @@ async fn test_handle_get_command_non_existent_key() {
     env.exec_command_ok(
         TestUtils::incr_command("grape"),
         &TestUtils::server_addr(41844),
-        &&TestUtils::expected_integer(1),
+        &TestUtils::expected_integer(1),
     )
     .await;
 
@@ -91,4 +91,23 @@ async fn test_handle_get_command_non_existent_key() {
             expiration: None,
         })
     );
+}
+
+#[tokio::test]
+async fn test_handle_incr_command_invalid_value() {
+    let mut env = TestEnv::new();
+
+    env.exec_command_ok(
+        TestUtils::set_command("grape", "not_a_number"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    env.exec_command_err(
+        TestUtils::incr_command("grape"),
+        &TestUtils::server_addr(41845),
+        CommandError::InvalidIncrValue,
+    )
+    .await;
 }

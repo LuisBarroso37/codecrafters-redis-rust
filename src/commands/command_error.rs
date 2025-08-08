@@ -58,6 +58,8 @@ pub enum CommandError {
     InvalidXReadBlockDuration,
     #[error("invalid INCR command")]
     InvalidIncrCommand,
+    #[error("invalid INCR value")]
+    InvalidIncrValue,
 }
 
 impl CommandError {
@@ -141,6 +143,9 @@ impl CommandError {
             }
             CommandError::InvalidIncrCommand => {
                 RespValue::Error("ERR Invalid INCR command".to_string()).encode()
+            }
+            CommandError::InvalidIncrValue => {
+                RespValue::Error("ERR value is not an integer or out of range".to_string()).encode()
             }
         }
     }

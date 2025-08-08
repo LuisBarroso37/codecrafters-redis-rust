@@ -49,7 +49,7 @@ pub async fn incr(
         DataType::String(ref mut stored_data) => {
             let int = stored_data
                 .parse::<i64>()
-                .map_err(|_| CommandError::InvalidDataTypeForKey)?;
+                .map_err(|_| CommandError::InvalidIncrValue)?;
             let incremented_int = int + 1;
             *stored_data = incremented_int.to_string();
 
