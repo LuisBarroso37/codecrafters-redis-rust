@@ -8,7 +8,7 @@ use tokio::{
 
 use crate::{
     commands::CommandProcessor, input::parse_input, key_value_store::KeyValueStore,
-    resp::RespValue, state::State,
+    resp::RespValue, state::State, transactions::handle_transaction,
 };
 
 mod commands;
@@ -16,6 +16,7 @@ mod input;
 mod key_value_store;
 mod resp;
 mod state;
+mod transactions;
 
 /// Main entry point for the Redis server implementation.
 ///
@@ -86,6 +87,17 @@ async fn main() {
                                 continue;
                             }
                         };
+
+                        if let Some(value) = handle_transaction(
+                            server_address.clone(),
+                            &mut state,
+                            &command_processor.name,
+                        )
+                        .await
+                        {
+                            let _ = stream.write_all(value.as_bytes()).await;
+                            continue;
+                        }
 
                         match command_processor
                             .handle_command(server_address, &mut store, &mut state)
