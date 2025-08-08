@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::commands::{CommandError, is_xread_stream_id_after, validate_stream_id};
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum StateError {
     #[error("Transaction already started")]
     TransactionAlreadyStarted,
@@ -267,9 +267,12 @@ impl State {
         }
     }
 
-    pub fn remove_transaction(&mut self, server_address: String) -> Result<(), StateError> {
+    pub fn remove_transaction(
+        &mut self,
+        server_address: String,
+    ) -> Result<Vec<Vec<String>>, StateError> {
         match self.transactions.remove(&server_address) {
-            Some(_) => Ok(()),
+            Some(transaction) => Ok(transaction),
             None => Err(StateError::NoTransactionInProgress),
         }
     }

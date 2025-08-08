@@ -5,6 +5,7 @@ use codecrafters_redis::{
     key_value_store::KeyValueStore,
     resp::RespValue,
     state::State,
+    transactions::{TransactionError, TransactionHandler},
 };
 use tokio::{sync::Mutex, time::timeout};
 
@@ -44,7 +45,7 @@ impl TestEnv {
         &mut self,
         command: Vec<RespValue>,
         server_addr: &str,
-    ) -> Result<String, codecrafters_redis::commands::CommandError> {
+    ) -> Result<String, CommandError> {
         let command_processor = CommandProcessor::new(command)?;
 
         command_processor
@@ -75,9 +76,56 @@ impl TestEnv {
         assert_eq!(result, Err(expected_error));
     }
 
+    /// Execute a transactioncommand and return the result
+    async fn exec_transaction_command(
+        &mut self,
+        command_name: &str,
+        server_addr: &str,
+    ) -> Result<Option<String>, TransactionError> {
+        let transaction_handler =
+            TransactionHandler::new(server_addr.to_string(), self.state.clone());
+
+        transaction_handler.handle_transaction(command_name).await
+    }
+
+    /// Execute a transaction command and assert it succeeds with expected result
+    pub async fn exec_transaction_ok(
+        &mut self,
+        command_name: &str,
+        server_addr: &str,
+        expected: &str,
+    ) {
+        let result = self
+            .exec_transaction_command(command_name, server_addr)
+            .await;
+        assert_eq!(result.is_ok(), true);
+
+        let expected = Some(expected.to_string());
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    /// Execute a transaction command and assert it fails
+    pub async fn exec_transaction_err(
+        &mut self,
+        command_name: &str,
+        server_addr: &str,
+        expected_error: TransactionError,
+    ) {
+        let result = self
+            .exec_transaction_command(command_name, server_addr)
+            .await;
+        assert_eq!(result.is_err(), true);
+        assert_eq!(result, Err(expected_error));
+    }
+
     /// Get a reference to the store for inspection
     pub async fn get_store(&self) -> tokio::sync::MutexGuard<'_, KeyValueStore> {
         self.store.lock().await
+    }
+
+    /// Get a reference to the state for inspection
+    pub async fn get_state(&self) -> tokio::sync::MutexGuard<'_, State> {
+        self.state.lock().await
     }
 }
 

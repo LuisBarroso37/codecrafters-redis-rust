@@ -8,7 +8,7 @@ use crate::{
     state::{State, StateError},
 };
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum TransactionError {
     #[error("Executed EXEC without MULTI")]
     ExecWithoutMulti,
@@ -56,10 +56,15 @@ impl TransactionHandler {
             "EXEC" => {
                 let mut state_guard = self.state.lock().await;
 
-                if let Some(_) = state_guard.get_transaction(&self.server_address) {
-                    Ok(Some(RespValue::SimpleString("OK".to_string()).encode()))
-                } else {
+                let Ok(transaction) = state_guard.remove_transaction(self.server_address.clone())
+                else {
                     return Err(TransactionError::ExecWithoutMulti);
+                };
+
+                if transaction.is_empty() {
+                    Ok(Some(RespValue::Array(Vec::new()).encode()))
+                } else {
+                    Ok(Some(RespValue::Array(Vec::new()).encode()))
                 }
             }
             _ => Ok(None),
