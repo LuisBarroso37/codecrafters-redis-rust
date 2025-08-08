@@ -1,6 +1,7 @@
 mod blpop;
 mod echo;
 mod get;
+mod incr;
 mod llen;
 mod lpop;
 mod lpush;

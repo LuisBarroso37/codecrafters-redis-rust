@@ -8,6 +8,7 @@ use crate::{
         command_error::CommandError,
         echo::echo,
         get::get,
+        incr::incr,
         llen::llen,
         lpop::lpop,
         lrange::lrange,
@@ -133,6 +134,7 @@ impl CommandProcessor {
             "XADD" => xadd(store, state, self.arguments.clone()).await,
             "XRANGE" => xrange(store, self.arguments.clone()).await,
             "XREAD" => xread(server_address, store, state, self.arguments.clone()).await,
+            "INCR" => incr(store, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

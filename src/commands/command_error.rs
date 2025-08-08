@@ -56,6 +56,8 @@ pub enum CommandError {
     InvalidXReadOption,
     #[error("invalid XREAD block duration")]
     InvalidXReadBlockDuration,
+    #[error("invalid INCR command")]
+    InvalidIncrCommand,
 }
 
 impl CommandError {
@@ -136,6 +138,9 @@ impl CommandError {
             }
             CommandError::InvalidXReadBlockDuration => {
                 RespValue::Error("ERR Invalid XREAD block duration".to_string()).encode()
+            }
+            CommandError::InvalidIncrCommand => {
+                RespValue::Error("ERR Invalid INCR command".to_string()).encode()
             }
         }
     }

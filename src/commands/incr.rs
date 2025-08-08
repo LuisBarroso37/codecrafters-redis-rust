@@ -1,0 +1,60 @@
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
+
+use crate::{
+    commands::CommandError,
+    key_value_store::{DataType, KeyValueStore, Value},
+    resp::RespValue,
+};
+
+/// Represents the parsed arguments for INCR command
+struct IncrArguments {
+    /// The key name to retrieve from the store
+    key: String,
+}
+
+impl IncrArguments {
+    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+        if arguments.len() != 1 {
+            return Err(CommandError::InvalidIncrCommand);
+        }
+
+        Ok(Self {
+            key: arguments[0].clone(),
+        })
+    }
+}
+
+pub async fn incr(
+    store: &mut Arc<Mutex<KeyValueStore>>,
+    arguments: Vec<String>,
+) -> Result<String, CommandError> {
+    let incr_arguments = IncrArguments::parse(arguments)?;
+
+    let mut store_guard = store.lock().await;
+
+    let Some(value) = store_guard.get_mut(&incr_arguments.key) else {
+        store_guard.insert(
+            incr_arguments.key,
+            Value {
+                data: DataType::String("1".to_string()),
+                expiration: None,
+            },
+        );
+        return Ok(RespValue::Integer(1).encode());
+    };
+
+    match value.data {
+        DataType::String(ref mut stored_data) => {
+            let int = stored_data
+                .parse::<i64>()
+                .map_err(|_| CommandError::InvalidDataTypeForKey)?;
+            let incremented_int = int + 1;
+            *stored_data = incremented_int.to_string();
+
+            Ok(RespValue::Integer(incremented_int).encode())
+        }
+        _ => return Err(CommandError::InvalidDataTypeForKey),
+    }
+}

@@ -276,6 +276,14 @@ impl TestUtils {
         vec![RespValue::Array(vec)]
     }
 
+    /// Create a INCR command
+    pub fn incr_command(key: &str) -> Vec<RespValue> {
+        vec![RespValue::Array(vec![
+            RespValue::BulkString("INCR".to_string()),
+            RespValue::BulkString(key.to_string()),
+        ])]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();

@@ -3,6 +3,7 @@ mod command_error;
 mod command_processor;
 mod echo;
 mod get;
+mod incr;
 mod llen;
 mod lpop;
 mod lrange;
