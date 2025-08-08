@@ -1,3 +1,3 @@
 mod transaction_handler;
 
-pub use transaction_handler::handle_transaction;
+pub use transaction_handler::TransactionHandler;

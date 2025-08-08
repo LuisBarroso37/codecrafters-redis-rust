@@ -8,7 +8,7 @@ use tokio::{
 
 use crate::{
     commands::CommandProcessor, input::parse_input, key_value_store::KeyValueStore,
-    resp::RespValue, state::State, transactions::handle_transaction,
+    resp::RespValue, state::State, transactions::TransactionHandler,
 };
 
 mod commands;
@@ -88,15 +88,22 @@ async fn main() {
                             }
                         };
 
-                        if let Some(value) = handle_transaction(
-                            server_address.clone(),
-                            &mut state,
-                            &command_processor.name,
-                        )
-                        .await
+                        let transaction_handler =
+                            TransactionHandler::new(server_address.clone(), state.clone());
+
+                        match transaction_handler
+                            .handle_transaction(&command_processor.name)
+                            .await
                         {
-                            let _ = stream.write_all(value.as_bytes()).await;
-                            continue;
+                            Ok(Some(value)) => {
+                                let _ = stream.write_all(value.as_bytes()).await;
+                                continue;
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                let _ = stream.write_all(e.as_string().as_bytes()).await;
+                                continue;
+                            }
                         }
 
                         match command_processor

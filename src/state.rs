@@ -1,8 +1,25 @@
 use std::collections::{HashMap, VecDeque};
-
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::commands::{CommandError, is_xread_stream_id_after, validate_stream_id};
+
+#[derive(Error, Debug)]
+pub enum StateError {
+    #[error("Transaction already started")]
+    TransactionAlreadyStarted,
+    #[error("No transaction in progress")]
+    NoTransactionInProgress,
+}
+
+impl StateError {
+    pub fn as_string(&self) -> String {
+        match self {
+            StateError::TransactionAlreadyStarted => "Transaction already started".to_string(),
+            StateError::NoTransactionInProgress => "No transaction in progress".to_string(),
+        }
+    }
+}
 
 /// Represents a client waiting for a BLPOP operation to complete.
 ///
@@ -41,6 +58,7 @@ pub struct State {
     pub blpop_subscribers: HashMap<String, VecDeque<BlpopSubscriber>>, // key --> subscriber
     /// Maps stream keys to stream IDs to clients waiting for XREAD operations
     pub xread_subscribers: HashMap<String, HashMap<String, Vec<XreadSubscriber>>>, // key --> stream id --> subscriber
+    pub transactions: HashMap<String, Vec<Vec<String>>>,
 }
 
 impl State {
@@ -51,6 +69,7 @@ impl State {
         State {
             blpop_subscribers: HashMap::new(),
             xread_subscribers: HashMap::new(),
+            transactions: HashMap::new(),
         }
     }
 
@@ -218,6 +237,41 @@ impl State {
         }
 
         return Ok(());
+    }
+
+    pub fn start_transaction(&mut self, server_address: String) -> Result<(), StateError> {
+        match self.transactions.get_mut(&server_address) {
+            Some(_) => Err(StateError::TransactionAlreadyStarted),
+            None => {
+                self.transactions.insert(server_address, Vec::new());
+                Ok(())
+            }
+        }
+    }
+
+    pub fn get_transaction(&mut self, server_address: &str) -> Option<&Vec<Vec<String>>> {
+        self.transactions.get(server_address)
+    }
+
+    pub fn add_to_transaction(
+        &mut self,
+        server_address: String,
+        command: Vec<String>,
+    ) -> Result<(), StateError> {
+        match self.transactions.get_mut(&server_address) {
+            Some(transactions) => {
+                transactions.push(command);
+                Ok(())
+            }
+            None => Err(StateError::NoTransactionInProgress),
+        }
+    }
+
+    pub fn remove_transaction(&mut self, server_address: String) -> Result<(), StateError> {
+        match self.transactions.remove(&server_address) {
+            Some(_) => Ok(()),
+            None => Err(StateError::NoTransactionInProgress),
+        }
     }
 }
 
