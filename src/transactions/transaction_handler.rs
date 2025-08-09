@@ -4,6 +4,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use crate::{
+    commands::CommandProcessor,
     resp::RespValue,
     state::{State, StateError},
 };
@@ -29,6 +30,12 @@ impl TransactionError {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum TransactionResult {
+    ImmediateResponse(String),
+    ExecuteCommands(Vec<CommandProcessor>),
+}
+
 pub struct TransactionHandler {
     pub server_address: String,
     pub state: Arc<Mutex<State>>,
@@ -44,14 +51,16 @@ impl TransactionHandler {
 
     pub async fn handle_transaction(
         &self,
-        command_name: &str,
-    ) -> Result<Option<String>, TransactionError> {
-        match command_name {
+        command: CommandProcessor,
+    ) -> Result<TransactionResult, TransactionError> {
+        match command.name.as_str() {
             "MULTI" => {
                 let mut state_guard = self.state.lock().await;
                 state_guard.start_transaction(self.server_address.clone())?;
 
-                Ok(Some(RespValue::SimpleString("OK".to_string()).encode()))
+                Ok(TransactionResult::ImmediateResponse(
+                    RespValue::SimpleString("OK".to_string()).encode(),
+                ))
             }
             "EXEC" => {
                 let mut state_guard = self.state.lock().await;
@@ -62,12 +71,25 @@ impl TransactionHandler {
                 };
 
                 if transaction.is_empty() {
-                    Ok(Some(RespValue::Array(Vec::new()).encode()))
+                    Ok(TransactionResult::ImmediateResponse(
+                        RespValue::Array(Vec::new()).encode(),
+                    ))
                 } else {
-                    Ok(Some(RespValue::Array(Vec::new()).encode()))
+                    Ok(TransactionResult::ExecuteCommands(transaction))
                 }
             }
-            _ => Ok(None),
+            _ => {
+                let mut state_guard = self.state.lock().await;
+
+                let Some(_) = state_guard.get_transaction(&self.server_address) else {
+                    return Ok(TransactionResult::ExecuteCommands(vec![command]));
+                };
+
+                state_guard.add_to_transaction(self.server_address.clone(), command)?;
+                Ok(TransactionResult::ImmediateResponse(
+                    RespValue::SimpleString("QUEUED".to_string()).encode(),
+                ))
+            }
         }
     }
 }

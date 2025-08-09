@@ -7,8 +7,12 @@ use tokio::{
 };
 
 use crate::{
-    commands::CommandProcessor, input::parse_input, key_value_store::KeyValueStore,
-    resp::RespValue, state::State, transactions::TransactionHandler,
+    commands::CommandProcessor,
+    input::parse_input,
+    key_value_store::KeyValueStore,
+    resp::RespValue,
+    state::State,
+    transactions::{TransactionHandler, TransactionResult},
 };
 
 mod commands;
@@ -92,29 +96,36 @@ async fn main() {
                             TransactionHandler::new(server_address.clone(), state.clone());
 
                         match transaction_handler
-                            .handle_transaction(&command_processor.name)
+                            .handle_transaction(command_processor)
                             .await
                         {
-                            Ok(Some(value)) => {
+                            Ok(TransactionResult::ImmediateResponse(value)) => {
                                 let _ = stream.write_all(value.as_bytes()).await;
                                 continue;
                             }
-                            Ok(None) => {}
+                            Ok(TransactionResult::ExecuteCommands(commands)) => {
+                                for cmd in commands {
+                                    match cmd
+                                        .handle_command(
+                                            server_address.clone(),
+                                            &mut store,
+                                            &mut state,
+                                        )
+                                        .await
+                                    {
+                                        Ok(resp) => {
+                                            let _ = stream.write_all(resp.as_bytes()).await;
+                                        }
+                                        Err(e) => {
+                                            let _ =
+                                                stream.write_all(e.as_string().as_bytes()).await;
+                                        }
+                                    }
+                                }
+                            }
                             Err(e) => {
                                 let _ = stream.write_all(e.as_string().as_bytes()).await;
                                 continue;
-                            }
-                        }
-
-                        match command_processor
-                            .handle_command(server_address, &mut store, &mut state)
-                            .await
-                        {
-                            Ok(resp) => {
-                                let _ = stream.write_all(resp.as_bytes()).await;
-                            }
-                            Err(e) => {
-                                let _ = stream.write_all(e.as_string().as_bytes()).await;
                             }
                         }
                     }

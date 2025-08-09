@@ -29,7 +29,7 @@ use crate::{
 ///
 /// This struct is responsible for parsing RESP arrays into Redis commands
 /// and dispatching them to the appropriate command handlers.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CommandProcessor {
     /// The name of the Redis command (e.g., "GET", "SET", "PING")
     pub name: String,

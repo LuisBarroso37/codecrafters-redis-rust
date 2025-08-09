@@ -5,7 +5,7 @@ use codecrafters_redis::{
     key_value_store::KeyValueStore,
     resp::RespValue,
     state::State,
-    transactions::{TransactionError, TransactionHandler},
+    transactions::{TransactionError, TransactionHandler, TransactionResult},
 };
 use tokio::{sync::Mutex, time::timeout};
 
@@ -76,43 +76,72 @@ impl TestEnv {
         assert_eq!(result, Err(expected_error));
     }
 
-    /// Execute a transactioncommand and return the result
+    /// Execute a transaction command and return the result
     async fn exec_transaction_command(
         &mut self,
-        command_name: &str,
+        command: CommandProcessor,
         server_addr: &str,
-    ) -> Result<Option<String>, TransactionError> {
+    ) -> Result<TransactionResult, TransactionError> {
         let transaction_handler =
             TransactionHandler::new(server_addr.to_string(), self.state.clone());
 
-        transaction_handler.handle_transaction(command_name).await
+        transaction_handler.handle_transaction(command).await
     }
 
-    /// Execute a transaction command and assert it succeeds with expected result
-    pub async fn exec_transaction_ok(
+    /// Execute a transaction command and assert it succeeds with an immediate response
+    pub async fn exec_transaction_immediate_response(
         &mut self,
-        command_name: &str,
+        command: Vec<RespValue>,
         server_addr: &str,
         expected: &str,
     ) {
+        let command_processor = CommandProcessor::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_name, server_addr)
+            .exec_transaction_command(command_processor, server_addr)
             .await;
         assert_eq!(result.is_ok(), true);
 
-        let expected = Some(expected.to_string());
-        assert_eq!(result.unwrap(), expected);
+        match result.unwrap() {
+            TransactionResult::ImmediateResponse(resp) => {
+                assert_eq!(resp, expected.to_string());
+            }
+            _ => panic!("Expected immediate response"),
+        }
+    }
+
+    /// Execute a transaction command and assert it returns the expected commands
+    pub async fn exec_transaction_commands(
+        &mut self,
+        command: Vec<RespValue>,
+        server_addr: &str,
+        expected: &[CommandProcessor],
+    ) {
+        let command_processor = CommandProcessor::new(command).unwrap();
+        let result = self
+            .exec_transaction_command(command_processor, server_addr)
+            .await;
+        assert_eq!(result.is_ok(), true);
+
+        match result.unwrap() {
+            TransactionResult::ImmediateResponse(_) => {
+                panic!("Expected commands, got immediate response");
+            }
+            TransactionResult::ExecuteCommands(commands) => {
+                assert_eq!(commands, expected);
+            }
+        }
     }
 
     /// Execute a transaction command and assert it fails
     pub async fn exec_transaction_err(
         &mut self,
-        command_name: &str,
+        command: Vec<RespValue>,
         server_addr: &str,
         expected_error: TransactionError,
     ) {
+        let command_processor = CommandProcessor::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_name, server_addr)
+            .exec_transaction_command(command_processor, server_addr)
             .await;
         assert_eq!(result.is_err(), true);
         assert_eq!(result, Err(expected_error));
@@ -330,6 +359,20 @@ impl TestUtils {
             RespValue::BulkString("INCR".to_string()),
             RespValue::BulkString(key.to_string()),
         ])]
+    }
+
+    /// Create a MULTI command
+    pub fn multi_command() -> Vec<RespValue> {
+        vec![RespValue::Array(vec![RespValue::BulkString(
+            "MULTI".to_string(),
+        )])]
+    }
+
+    /// Create a EXEC command
+    pub fn exec_command() -> Vec<RespValue> {
+        vec![RespValue::Array(vec![RespValue::BulkString(
+            "EXEC".to_string(),
+        )])]
     }
 
     /// Create an invalid command
