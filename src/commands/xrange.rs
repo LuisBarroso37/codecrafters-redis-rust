@@ -10,14 +10,52 @@ use crate::{
     resp::RespValue,
 };
 
-struct XrangeArguments {
+/// Represents the parsed arguments for the XRANGE command.
+///
+/// The XRANGE command in Redis returns a range of entries from a stream stored at the given key.
+/// This struct holds the key and the start and end stream IDs for the range operation.
+pub struct XrangeArguments {
+    ///  The name of the stream key to operate on
     key: String,
+    /// The starting stream ID for the range (can be "-" for the beginning)
     start_stream_id: String,
+    /// The ending stream ID for the range (can be "+" for the end)
     end_stream_id: String,
 }
 
 impl XrangeArguments {
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    /// Parses and validates the arguments for the XRANGE command.
+    ///
+    /// The XRANGE command requires exactly three arguments: the key, the start stream ID, and the end stream ID.
+    /// This function checks the argument count and clones the arguments into the struct fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - A vector of command arguments: [key, start_stream_id, end_stream_id]
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(XrangeArguments)` - If the arguments are valid
+    /// * `Err(CommandError::InvalidXRangeCommand)` - If the number of arguments is not exactly 3
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Valid usage
+    /// let args = XrangeArguments::parse(vec![
+    ///     "mystream".to_string(),
+    ///     "-".to_string(),
+    ///     "+".to_string()
+    /// ]).unwrap();
+    /// assert_eq!(args.key, "mystream");
+    /// assert_eq!(args.start_stream_id, "-");
+    /// assert_eq!(args.end_stream_id, "+");
+    ///
+    /// // Invalid usage: not enough arguments
+    /// let err = XrangeArguments::parse(vec!["mystream".to_string()]);
+    /// assert!(err.is_err());
+    /// ```
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 3 {
             return Err(CommandError::InvalidXRangeCommand);
         }

@@ -12,7 +12,7 @@ use crate::{
 ///
 /// Contains the key name and count of elements to pop from the left side of a list.
 /// The LPOP command supports both single element and multiple element operations.
-struct LpopArguments {
+pub struct LpopArguments {
     /// The key name of the list to pop elements from
     key: String,
     /// Number of elements to pop from the left side (defaults to 1 if not specified)
@@ -74,7 +74,7 @@ impl LpopArguments {
     /// let result = LpopArguments::parse(vec!["mylist".to_string(), "invalid".to_string()]);
     /// // Returns: Err(CommandError::InvalidLPopCommandArgument)
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() < 1 || arguments.len() > 2 {
             return Err(CommandError::InvalidLPopCommand);
         }

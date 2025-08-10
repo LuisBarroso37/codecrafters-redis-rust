@@ -1,11 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use codecrafters_redis::{
-    commands::{CommandError, CommandProcessor},
+    commands::{CommandDispatcher, CommandError, CommandHandler, DispatchError, DispatchResult},
     key_value_store::KeyValueStore,
     resp::RespValue,
     state::State,
-    transactions::{TransactionError, TransactionHandler, TransactionResult},
 };
 use tokio::{sync::Mutex, time::timeout};
 
@@ -46,9 +45,9 @@ impl TestEnv {
         command: Vec<RespValue>,
         server_addr: &str,
     ) -> Result<String, CommandError> {
-        let command_processor = CommandProcessor::new(command)?;
+        let command_handler = CommandHandler::new(command)?;
 
-        command_processor
+        command_handler
             .handle_command(server_addr.to_string(), &mut self.store, &mut self.state)
             .await
     }
@@ -79,13 +78,13 @@ impl TestEnv {
     /// Execute a transaction command and return the result
     async fn exec_transaction_command(
         &mut self,
-        command: CommandProcessor,
+        command: CommandHandler,
         server_addr: &str,
-    ) -> Result<TransactionResult, TransactionError> {
-        let transaction_handler =
-            TransactionHandler::new(server_addr.to_string(), self.state.clone());
+    ) -> Result<DispatchResult, DispatchError> {
+        let command_dispatcher =
+            CommandDispatcher::new(server_addr.to_string(), self.state.clone());
 
-        transaction_handler.handle_transaction(command).await
+        command_dispatcher.dispatch_command(command).await
     }
 
     /// Execute a transaction command and assert it succeeds with an immediate response
@@ -95,14 +94,14 @@ impl TestEnv {
         server_addr: &str,
         expected: &str,
     ) {
-        let command_processor = CommandProcessor::new(command).unwrap();
+        let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_processor, server_addr)
+            .exec_transaction_command(command_handler, server_addr)
             .await;
         assert_eq!(result.is_ok(), true);
 
         match result.unwrap() {
-            TransactionResult::ImmediateResponse(resp) => {
+            DispatchResult::ImmediateResponse(resp) => {
                 assert_eq!(resp, expected.to_string());
             }
             _ => panic!("Expected immediate response"),
@@ -110,25 +109,23 @@ impl TestEnv {
     }
 
     /// Execute a transaction command and assert it returns the expected commands
-    pub async fn exec_transaction_commands(
+    pub async fn exec_transaction_expected_commands(
         &mut self,
         command: Vec<RespValue>,
         server_addr: &str,
-        expected: &[CommandProcessor],
+        expected: &[CommandHandler],
     ) {
-        let command_processor = CommandProcessor::new(command).unwrap();
+        let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_processor, server_addr)
+            .exec_transaction_command(command_handler, server_addr)
             .await;
         assert_eq!(result.is_ok(), true);
 
         match result.unwrap() {
-            TransactionResult::ImmediateResponse(_) => {
-                panic!("Expected commands, got immediate response");
-            }
-            TransactionResult::ExecuteCommands(commands) => {
+            DispatchResult::ExecuteTransactionCommands(commands) => {
                 assert_eq!(commands, expected);
             }
+            _ => panic!("Expected commands, got something else"),
         }
     }
 
@@ -137,14 +134,35 @@ impl TestEnv {
         &mut self,
         command: Vec<RespValue>,
         server_addr: &str,
-        expected_error: TransactionError,
+        expected_error: DispatchError,
     ) {
-        let command_processor = CommandProcessor::new(command).unwrap();
+        let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_processor, server_addr)
+            .exec_transaction_command(command_handler, server_addr)
             .await;
         assert_eq!(result.is_err(), true);
         assert_eq!(result, Err(expected_error));
+    }
+
+    /// Execute queued transaction commands and assert it returns the expected response
+    pub async fn exec_transaction_execute_commands(
+        &mut self,
+        command: Vec<RespValue>,
+        server_addr: &str,
+        expected: String,
+    ) {
+        let command_handler = CommandHandler::new(command).unwrap();
+        let result = self
+            .exec_transaction_command(command_handler, server_addr)
+            .await;
+        assert_eq!(result.is_ok(), true);
+
+        let response = result
+            .unwrap()
+            .handle_dispatch_result(server_addr.to_string(), &mut self.store, &mut self.state)
+            .await;
+
+        assert_eq!(response, expected);
     }
 
     /// Get a reference to the store for inspection
@@ -403,9 +421,9 @@ impl TestUtils {
         let server_addr = server_addr.to_string();
 
         tokio::spawn(async move {
-            let command_processor = CommandProcessor::new(blpop_command)?;
+            let command_handler = CommandHandler::new(blpop_command)?;
 
-            command_processor
+            command_handler
                 .handle_command(
                     server_addr,
                     &mut store_clone.clone(),
@@ -429,9 +447,9 @@ impl TestUtils {
         let server_addr = server_addr.to_string();
 
         tokio::spawn(async move {
-            let command_processor = CommandProcessor::new(xread_blocking_command)?;
+            let command_handler = CommandHandler::new(xread_blocking_command)?;
 
-            command_processor
+            command_handler
                 .handle_command(
                     server_addr,
                     &mut store_clone.clone(),
@@ -472,8 +490,8 @@ impl TestUtils {
         "$-1\r\n".to_string()
     }
 
-    /// Create expected array response
-    pub fn expected_array(items: &[&str]) -> String {
+    /// Create expected bulk string array response
+    pub fn expected_bulk_string_array(items: &[&str]) -> String {
         let mut response = format!("*{}\r\n", items.len());
         for item in items {
             response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));

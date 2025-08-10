@@ -143,7 +143,7 @@ async fn test_handle_xread_command_key_not_found() {
     env.exec_command_ok(
         TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
         &TestUtils::server_addr(41844),
-        &TestUtils::expected_array(&[]),
+        &TestUtils::expected_bulk_string_array(&[]),
     )
     .await;
 }

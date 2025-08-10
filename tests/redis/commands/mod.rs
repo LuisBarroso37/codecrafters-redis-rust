@@ -1,4 +1,5 @@
 mod blpop;
+mod command_dispatcher;
 mod echo;
 mod get;
 mod incr;

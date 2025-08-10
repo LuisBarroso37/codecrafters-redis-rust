@@ -77,7 +77,7 @@ impl SetArguments {
     /// ]);
     /// // Returns: Err(CommandError::InvalidSetCommandArgument)
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 2 && arguments.len() != 4 {
             return Err(CommandError::InvalidSetCommand);
         }

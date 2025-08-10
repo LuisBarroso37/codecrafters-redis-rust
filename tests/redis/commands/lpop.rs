@@ -126,7 +126,7 @@ async fn test_handle_lpop_command_multiple_elements() {
     env.exec_command_ok(
         TestUtils::lpop_command_multiple_items("grape", 2),
         &TestUtils::server_addr(41844),
-        &TestUtils::expected_array(&["mango", "raspberry"]),
+        &TestUtils::expected_bulk_string_array(&["mango", "raspberry"]),
     )
     .await;
 

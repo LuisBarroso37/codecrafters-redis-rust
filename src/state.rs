@@ -2,9 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::commands::{
-    CommandError, CommandProcessor, is_xread_stream_id_after, validate_stream_id,
-};
+use crate::commands::{CommandError, CommandHandler, is_xread_stream_id_after, validate_stream_id};
 
 #[derive(Error, Debug, PartialEq)]
 pub enum StateError {
@@ -60,7 +58,7 @@ pub struct State {
     pub blpop_subscribers: HashMap<String, VecDeque<BlpopSubscriber>>, // key --> subscriber
     /// Maps stream keys to stream IDs to clients waiting for XREAD operations
     pub xread_subscribers: HashMap<String, HashMap<String, Vec<XreadSubscriber>>>, // key --> stream id --> subscriber
-    pub transactions: HashMap<String, Vec<CommandProcessor>>,
+    pub transactions: HashMap<String, Vec<CommandHandler>>,
 }
 
 impl State {
@@ -251,14 +249,14 @@ impl State {
         }
     }
 
-    pub fn get_transaction(&mut self, server_address: &str) -> Option<&Vec<CommandProcessor>> {
+    pub fn get_transaction(&mut self, server_address: &str) -> Option<&Vec<CommandHandler>> {
         self.transactions.get(server_address)
     }
 
     pub fn add_to_transaction(
         &mut self,
         server_address: String,
-        command: CommandProcessor,
+        command: CommandHandler,
     ) -> Result<(), StateError> {
         match self.transactions.get_mut(&server_address) {
             Some(transactions) => {
@@ -272,7 +270,7 @@ impl State {
     pub fn remove_transaction(
         &mut self,
         server_address: String,
-    ) -> Result<Vec<CommandProcessor>, StateError> {
+    ) -> Result<Vec<CommandHandler>, StateError> {
         match self.transactions.remove(&server_address) {
             Some(transaction) => Ok(transaction),
             None => Err(StateError::NoTransactionInProgress),

@@ -1,6 +1,7 @@
 mod blpop;
+mod command_dispatcher;
 mod command_error;
-mod command_processor;
+mod command_handler;
 mod echo;
 mod get;
 mod incr;
@@ -16,7 +17,8 @@ mod xadd;
 mod xrange;
 mod xread;
 
+pub use command_dispatcher::{CommandDispatcher, DispatchError, DispatchResult};
 pub use command_error::CommandError;
-pub use command_processor::CommandProcessor;
+pub use command_handler::CommandHandler;
 pub use stream_utils::validate_stream_id;
 pub use xread::is_xread_stream_id_after;

@@ -7,12 +7,11 @@ use tokio::{
 };
 
 use crate::{
-    commands::CommandProcessor,
+    commands::{CommandDispatcher, CommandHandler},
     input::parse_input,
     key_value_store::KeyValueStore,
     resp::RespValue,
     state::State,
-    transactions::{TransactionHandler, TransactionResult},
 };
 
 mod commands;
@@ -20,7 +19,6 @@ mod input;
 mod key_value_store;
 mod resp;
 mod state;
-mod transactions;
 
 /// Main entry point for the Redis server implementation.
 ///
@@ -68,8 +66,8 @@ async fn main() {
                             }
                         };
 
-                        let parsed_command = match RespValue::parse(input) {
-                            Ok(cmd) => cmd,
+                        let parsed_input = match RespValue::parse(input) {
+                            Ok(input) => input,
                             Err(e) => {
                                 let _ = stream.write_all(e.as_bytes()).await;
                                 continue;
@@ -84,7 +82,7 @@ async fn main() {
                             }
                         };
 
-                        let command_processor = match CommandProcessor::new(parsed_command) {
+                        let command_handler = match CommandHandler::new(parsed_input) {
                             Ok(cmd) => cmd,
                             Err(e) => {
                                 let _ = stream.write_all(e.as_string().as_bytes()).await;
@@ -92,42 +90,22 @@ async fn main() {
                             }
                         };
 
-                        let transaction_handler =
-                            TransactionHandler::new(server_address.clone(), state.clone());
-
-                        match transaction_handler
-                            .handle_transaction(command_processor)
-                            .await
-                        {
-                            Ok(TransactionResult::ImmediateResponse(value)) => {
-                                let _ = stream.write_all(value.as_bytes()).await;
-                                continue;
-                            }
-                            Ok(TransactionResult::ExecuteCommands(commands)) => {
-                                for cmd in commands {
-                                    match cmd
-                                        .handle_command(
-                                            server_address.clone(),
-                                            &mut store,
-                                            &mut state,
-                                        )
-                                        .await
-                                    {
-                                        Ok(resp) => {
-                                            let _ = stream.write_all(resp.as_bytes()).await;
-                                        }
-                                        Err(e) => {
-                                            let _ =
-                                                stream.write_all(e.as_string().as_bytes()).await;
-                                        }
-                                    }
+                        let dispatch_result =
+                            match CommandDispatcher::new(server_address.clone(), state.clone())
+                                .dispatch_command(command_handler)
+                                .await
+                            {
+                                Ok(result) => result,
+                                Err(e) => {
+                                    let _ = stream.write_all(e.as_string().as_bytes()).await;
+                                    continue;
                                 }
-                            }
-                            Err(e) => {
-                                let _ = stream.write_all(e.as_string().as_bytes()).await;
-                                continue;
-                            }
-                        }
+                            };
+
+                        let response = dispatch_result
+                            .handle_dispatch_result(server_address, &mut store, &mut state)
+                            .await;
+                        let _ = stream.write_all(response.as_bytes()).await;
                     }
                 });
             }

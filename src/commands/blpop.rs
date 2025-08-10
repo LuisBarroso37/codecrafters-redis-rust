@@ -13,7 +13,7 @@ use crate::{
 ///
 /// Contains the key name and blocking duration for the BLPOP operation.
 /// The BLPOP command blocks until an element is available or timeout expires.
-struct BlpopArguments {
+pub struct BlpopArguments {
     /// The key name of the list to block and pop from
     key: String,
     /// Blocking duration in seconds (0.0 means block indefinitely)
@@ -67,7 +67,7 @@ impl BlpopArguments {
     /// let result = BlpopArguments::parse(vec!["mylist".to_string(), "invalid".to_string()]);
     /// // Returns: Err(CommandError::InvalidBLPopCommandArgument)
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 2 {
             return Err(CommandError::InvalidBLPopCommand);
         }

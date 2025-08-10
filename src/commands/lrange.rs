@@ -8,14 +8,53 @@ use crate::{
     resp::RespValue,
 };
 
-struct LrangeArguments {
+/// Represents the parsed arguments for the LRANGE command.
+///
+/// The LRANGE command in Redis returns a range of elements from a list stored at the given key.
+/// This struct holds the key and the normalized start and end indices for the range operation.
+pub struct LrangeArguments {
+    /// The key name to retrieve from the store
     key: String,
+    /// The starting index for the range (can be negative to count from the end)
     start_index: isize,
+    /// The ending index for the range (can be negative to count from the end)
     end_index: isize,
 }
 
 impl LrangeArguments {
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    /// Parses and validates the arguments for the LRANGE command.
+    ///
+    /// The LRANGE command requires exactly three arguments: the key, the start index, and the end index.
+    /// This function checks the argument count and parses the indices as signed integers.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - A vector of command arguments: [key, start_index, end_index]
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LrangeArguments)` - If the arguments are valid
+    /// * `Err(CommandError::InvalidLRangeCommand)` - If the number of arguments is not exactly 3
+    /// * `Err(CommandError::InvalidLRangeCommandArgument)` - If start or end index is not a valid integer
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Valid usage
+    /// let args = LrangeArguments::parse(vec!["mylist".to_string(), "0".to_string(), "2".to_string()]).unwrap();
+    /// assert_eq!(args.key, "mylist");
+    /// assert_eq!(args.start_index, 0);
+    /// assert_eq!(args.end_index, 2);
+    ///
+    /// // Invalid usage: not enough arguments
+    /// let err = LrangeArguments::parse(vec!["mylist".to_string()]);
+    /// assert!(err.is_err());
+    ///
+    /// // Invalid usage: non-integer index
+    /// let err = LrangeArguments::parse(vec!["mylist".to_string(), "a".to_string(), "2".to_string()]);
+    /// assert!(err.is_err());
+    /// ```
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 3 {
             return Err(CommandError::InvalidLRangeCommand);
         }

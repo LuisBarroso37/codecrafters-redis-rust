@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Represents the parsed arguments for LPUSH and RPUSH commands
-struct PushArrayOperations {
+pub struct PushArrayOperations {
     /// The key name to retrieve from the store
     key: String,
     /// The values to be pushed to the list
@@ -42,7 +42,7 @@ impl PushArrayOperations {
     /// assert_eq!(parsed.key, "mylist");
     /// assert_eq!(parsed.values, vec!["value1", "value2"]);
     /// ```
-    fn parse(arguments: Vec<String>, should_prepend: bool) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>, should_prepend: bool) -> Result<Self, CommandError> {
         if arguments.len() < 2 {
             return if should_prepend {
                 Err(CommandError::InvalidLPushCommand)

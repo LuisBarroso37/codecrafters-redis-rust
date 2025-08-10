@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Represents the parsed arguments for XADD command
-struct XaddArguments {
+pub struct XaddArguments {
     /// The Redis stream key where the entry will be added
     key: String,
     /// The stream ID for the new entry ("*" for auto-generation or "timestamp-sequence")
@@ -48,7 +48,7 @@ impl XaddArguments {
     /// assert_eq!(parsed.stream_id, "*");
     /// assert_eq!(parsed.entries.get("temp"), Some(&"25".to_string()));
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() < 4 {
             return Err(CommandError::InvalidXAddCommand);
         }

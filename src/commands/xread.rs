@@ -15,7 +15,7 @@ use crate::{
 ///
 /// The XREAD command can be called with optional blocking duration and multiple key-stream pairs.
 /// Format: `XREAD [BLOCK milliseconds] STREAMS key1 key2 ... id1 id2 ...`
-struct XreadArguments {
+pub struct XreadArguments {
     /// Optional blocking duration in milliseconds. None for non-blocking operation.
     /// A value of 0 means block indefinitely until data is available.
     blocking_duration: Option<u64>,
@@ -61,7 +61,7 @@ impl XreadArguments {
     ///     "$".to_string()
     /// ])?;
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() < 3 {
             return Err(CommandError::InvalidXReadCommand);
         }

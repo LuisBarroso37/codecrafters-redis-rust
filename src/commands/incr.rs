@@ -12,7 +12,7 @@ use crate::{
 ///
 /// The INCR command takes exactly one argument: the key name to increment.
 /// Format: `INCR key`
-struct IncrArguments {
+pub struct IncrArguments {
     /// The key name to increment in the store
     key: String,
 }
@@ -46,7 +46,7 @@ impl IncrArguments {
     /// let result = IncrArguments::parse(vec!["key1".to_string(), "key2".to_string()]);
     /// assert!(result.is_err());
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 1 {
             return Err(CommandError::InvalidIncrCommand);
         }

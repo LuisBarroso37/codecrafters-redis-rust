@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Represents the parsed arguments for TYPE command
-struct TypeArguments {
+pub struct TypeArguments {
     /// The key name to retrieve from the store
     key: String,
 }
@@ -40,7 +40,7 @@ impl TypeArguments {
     /// let invalid_args = vec!["key1".to_string(), "key2".to_string()];
     /// assert!(TypeArguments::parse(invalid_args).is_err());
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 1 {
             return Err(CommandError::InvalidTypeCommand);
         }

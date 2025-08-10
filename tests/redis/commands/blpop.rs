@@ -18,7 +18,7 @@ async fn test_handle_blpop_command_direct_response() {
     env.exec_command_ok(
         TestUtils::blpop_command("grape", "0"),
         &TestUtils::server_addr(41844),
-        &TestUtils::expected_array(&["grape", "mango"]),
+        &TestUtils::expected_bulk_string_array(&["grape", "mango"]),
     )
     .await;
 }
@@ -51,7 +51,10 @@ async fn test_blpop_concurrent_clients_simple_blocking() {
     // Client should get the item
     assert_eq!(
         client_result,
-        Ok(TestUtils::expected_array(&["test_list", "item1"]))
+        Ok(TestUtils::expected_bulk_string_array(&[
+            "test_list",
+            "item1"
+        ]))
     );
 }
 
@@ -96,7 +99,7 @@ async fn test_blpop_concurrent_clients_first_come_first_served() {
     // The successful result should be properly formatted
     assert_eq!(
         successful_results[0],
-        &TestUtils::expected_array(&["test_queue", "single_item"])
+        &TestUtils::expected_bulk_string_array(&["test_queue", "single_item"])
     );
 }
 
@@ -153,7 +156,7 @@ async fn test_blpop_zero_timeout_infinite_wait() {
 
     assert_eq!(
         blpop_result,
-        Ok(TestUtils::expected_array(&[
+        Ok(TestUtils::expected_bulk_string_array(&[
             "infinite_list",
             "unblock_item"
         ]))
@@ -214,7 +217,10 @@ async fn test_blpop_multiple_pushes_multiple_clients() {
     for (i, result) in successful_results.iter().enumerate() {
         assert_eq!(
             result.as_str(),
-            &TestUtils::expected_array(&["multi_queue", format!("item_{}", i).as_str()])
+            &TestUtils::expected_bulk_string_array(&[
+                "multi_queue",
+                format!("item_{}", i).as_str()
+            ])
         );
     }
 }

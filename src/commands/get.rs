@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Represents the parsed arguments for GET command
-struct GetArguments {
+pub struct GetArguments {
     /// The key name to retrieve from the store
     key: String,
 }
@@ -38,7 +38,7 @@ impl GetArguments {
     /// let result = GetArguments::parse(vec!["key1".to_string(), "key2".to_string()]);
     /// // Returns: Err(CommandError::InvalidGetCommand)
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 1 {
             return Err(CommandError::InvalidGetCommand);
         }

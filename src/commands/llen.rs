@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Represents the parsed arguments for LLEN command
-struct LlenArguments {
+pub struct LlenArguments {
     /// The key name to retrieve from the store
     key: String,
 }
@@ -53,7 +53,7 @@ impl LlenArguments {
     /// let result = LlenArguments::parse(vec!["list1".to_string(), "list2".to_string()]);
     /// // Returns: Err(CommandError::InvalidLLenCommand)
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 1 {
             return Err(CommandError::InvalidLLenCommand);
         }

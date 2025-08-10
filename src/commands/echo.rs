@@ -1,7 +1,7 @@
 use crate::{commands::command_error::CommandError, resp::RespValue};
 
 /// Represents the parsed arguments for ECHO command
-struct EchoArguments {
+pub struct EchoArguments {
     /// String to return as response
     argument: String,
 }
@@ -30,7 +30,7 @@ impl EchoArguments {
     /// let result = EchoArguments::parse(vec![]);
     /// // Returns: Err(CommandError::InvalidEchoCommand)
     /// ```
-    fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
+    pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 1 {
             return Err(CommandError::InvalidEchoCommand);
         }
