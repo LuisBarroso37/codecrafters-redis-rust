@@ -18,6 +18,8 @@ pub enum DispatchError {
     DispatchError(#[from] StateError),
     #[error("Invalid command in transaction queue")]
     InvalidQueueCommand(#[from] CommandError),
+    #[error("Executed DISCARD without MULTI")]
+    DiscardWithoutMulti,
 }
 
 impl DispatchError {
@@ -31,6 +33,9 @@ impl DispatchError {
             }
             DispatchError::InvalidQueueCommand(err) => {
                 RespValue::Error(format!("ERR {}", err.as_string())).encode()
+            }
+            DispatchError::DiscardWithoutMulti => {
+                RespValue::Error("ERR DISCARD without MULTI".to_string()).encode()
             }
         }
     }
@@ -126,6 +131,17 @@ impl CommandDispatcher {
                 } else {
                     Ok(DispatchResult::ExecuteTransactionCommands(transaction))
                 }
+            }
+            "DISCARD" => {
+                let mut state_guard = self.state.lock().await;
+
+                let Ok(_) = state_guard.remove_transaction(self.server_address.clone()) else {
+                    return Err(DispatchError::DiscardWithoutMulti);
+                };
+
+                Ok(DispatchResult::ImmediateResponse(
+                    RespValue::SimpleString("OK".to_string()).encode(),
+                ))
             }
             _ => {
                 let mut state_guard = self.state.lock().await;

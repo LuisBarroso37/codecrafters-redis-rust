@@ -213,3 +213,43 @@ async fn test_handle_should_run_queued_commands() {
     let transaction = state_guard.get_transaction(&TestUtils::server_addr(41844));
     assert_eq!(transaction, None);
 }
+
+#[tokio::test]
+async fn test_handle_discard_command_should_remove_transaction() {
+    let mut env = TestEnv::new();
+
+    env.exec_transaction_immediate_response(
+        TestUtils::multi_command(),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    let mut state_guard = env.get_state().await;
+    let transaction = state_guard.get_transaction(&TestUtils::server_addr(41844));
+    assert_eq!(transaction, Some(&Vec::new()));
+    drop(state_guard);
+
+    env.exec_transaction_immediate_response(
+        TestUtils::discard_command(),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    let mut state_guard = env.get_state().await;
+    let transaction = state_guard.get_transaction(&TestUtils::server_addr(41844));
+    assert_eq!(transaction, None);
+}
+
+#[tokio::test]
+async fn test_handle_discard_command_without_using_multi_before() {
+    let mut env = TestEnv::new();
+
+    env.exec_transaction_err(
+        TestUtils::discard_command(),
+        &TestUtils::server_addr(41844),
+        DispatchError::DiscardWithoutMulti,
+    )
+    .await;
+}

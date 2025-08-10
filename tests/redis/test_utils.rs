@@ -393,6 +393,13 @@ impl TestUtils {
         )])]
     }
 
+    /// Create a DISCARD command
+    pub fn discard_command() -> Vec<RespValue> {
+        vec![RespValue::Array(vec![RespValue::BulkString(
+            "DISCARD".to_string(),
+        )])]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();
