@@ -11,6 +11,7 @@ use crate::{
     input::parse_input,
     key_value_store::KeyValueStore,
     resp::RespValue,
+    server::RedisServer,
     state::State,
 };
 
@@ -18,6 +19,7 @@ mod commands;
 mod input;
 mod key_value_store;
 mod resp;
+mod server;
 mod state;
 
 /// Main entry point for the Redis server implementation.
@@ -31,10 +33,11 @@ mod state;
 /// - Server state for managing blocking operations and client subscriptions
 #[tokio::main]
 async fn main() {
-    // Bind to the standard Redis port
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let server = RedisServer::new(std::env::args()).unwrap();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", server.port))
+        .await
+        .unwrap();
 
-    // Initialize shared state protected by mutexes for thread-safe access
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
     let state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
 
