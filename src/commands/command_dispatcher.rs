@@ -10,19 +10,28 @@ use crate::{
     state::{State, StateError},
 };
 
+/// Represents errors that can occur during command dispatching and transaction handling.
+///
+/// This enum covers errors such as executing `EXEC` or `DISCARD` without a transaction,
+/// transaction state errors, and invalid commands in the transaction queue.
 #[derive(Error, Debug, PartialEq)]
 pub enum DispatchError {
+    /// Attempted to execute `EXEC` without a preceding `MULTI`.
     #[error("Executed EXEC without MULTI")]
     ExecWithoutMulti,
+    /// Error occurred in transaction state management.
     #[error("Transaction error")]
     DispatchError(#[from] StateError),
+    /// Invalid command was added to the transaction queue.
     #[error("Invalid command in transaction queue")]
     InvalidQueueCommand(#[from] CommandError),
+    /// Attempted to execute `DISCARD` without a preceding `MULTI`.
     #[error("Executed DISCARD without MULTI")]
     DiscardWithoutMulti,
 }
 
 impl DispatchError {
+    /// Converts the error into a RESP-encoded error string suitable for client responses.
     pub fn as_string(&self) -> String {
         match self {
             DispatchError::ExecWithoutMulti => {
@@ -41,14 +50,34 @@ impl DispatchError {
     }
 }
 
+/// Represents the result of dispatching a command.
+///
+/// This enum distinguishes between immediate responses (such as "OK" or "QUEUED"),
+/// execution of a single command, and execution of a batch of commands in a transaction.
 #[derive(Debug, PartialEq)]
 pub enum DispatchResult {
+    /// An immediate response string to be sent to the client.
     ImmediateResponse(String),
+    /// A batch of commands to be executed as part of a transaction.
     ExecuteTransactionCommands(Vec<CommandHandler>),
+    /// A single command to be executed immediately.
     ExecuteSingleCommand(CommandHandler),
 }
 
 impl DispatchResult {
+    /// Handles the result of command dispatching and produces a RESP-encoded response string.
+    ///
+    /// This method executes any commands as needed and collects their responses.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_address` - The address of the server instance (used for transaction context)
+    /// * `store` - A mutable reference to the key-value store
+    /// * `state` - A mutable reference to the server state
+    ///
+    /// # Returns
+    ///
+    /// * `String` - A RESP-encoded response to be sent to the client
     pub async fn handle_dispatch_result(
         &self,
         server_address: String,
@@ -90,12 +119,20 @@ impl DispatchResult {
     }
 }
 
+/// The main dispatcher responsible for handling and routing Redis commands.
+///
+/// This struct manages the execution of commands, including transaction state,
+/// queuing, and error handling. It supports both transactional and non-transactional
+/// command flows.
 pub struct CommandDispatcher {
+    /// The address of the server instance (used for transaction context).
     pub server_address: String,
+    /// Shared state for managing transactions and blocking operations.
     pub state: Arc<Mutex<State>>,
 }
 
 impl CommandDispatcher {
+    /// Creates a new `CommandDispatcher` with the given server address and state.
     pub fn new(server_address: String, state: Arc<Mutex<State>>) -> Self {
         CommandDispatcher {
             server_address,
@@ -103,6 +140,26 @@ impl CommandDispatcher {
         }
     }
 
+    /// Dispatches a command for execution, handling transactional and non-transactional logic.
+    ///
+    /// This method determines whether to queue the command (if inside a transaction),
+    /// execute it immediately, or return an immediate response (such as "OK" or "QUEUED").
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command to be dispatched and executed
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(DispatchResult)` - The result of dispatching the command
+    /// * `Err(DispatchError)` - If an error occurs during dispatch or transaction handling
+    ///
+    /// # Transactional Behavior
+    ///
+    /// - `MULTI`: Starts a new transaction and returns "OK"
+    /// - `EXEC`: Executes all queued commands in the transaction
+    /// - `DISCARD`: Discards the transaction and returns "OK"
+    /// - Other commands: Queued if inside a transaction, executed immediately otherwise
     pub async fn dispatch_command(
         &self,
         command: CommandHandler,

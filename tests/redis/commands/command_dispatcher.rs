@@ -290,3 +290,64 @@ async fn test_handle_should_run_all_queued_commands_even_if_errors_occur() {
     let transaction = state_guard.get_transaction(&TestUtils::server_addr(41844));
     assert_eq!(transaction, None);
 }
+
+#[tokio::test]
+async fn test_handle_should_run_transactions_from_concurrent_clients() {
+    let mut env = TestEnv::new();
+
+    let server_address_1 = TestUtils::server_addr(41844);
+
+    env.exec_transaction_immediate_response(
+        TestUtils::multi_command(),
+        &server_address_1,
+        &TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    env.exec_transaction_immediate_response(
+        TestUtils::set_command("grapes", "4"),
+        &server_address_1,
+        &TestUtils::expected_simple_string("QUEUED"),
+    )
+    .await;
+
+    env.exec_transaction_immediate_response(
+        TestUtils::incr_command("grapes"),
+        &server_address_1,
+        &TestUtils::expected_simple_string("QUEUED"),
+    )
+    .await;
+
+    env.exec_transaction_execute_commands(
+        TestUtils::exec_command(),
+        &server_address_1,
+        "*2\r\n+OK\r\n:5\r\n".to_string(),
+    )
+    .await;
+
+    let mut env_clone = env.clone();
+
+    env_clone
+        .exec_transaction_immediate_response(
+            TestUtils::multi_command(),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_simple_string("OK"),
+        )
+        .await;
+
+    env_clone
+        .exec_transaction_immediate_response(
+            TestUtils::incr_command("grapes"),
+            &TestUtils::server_addr(41844),
+            &TestUtils::expected_simple_string("QUEUED"),
+        )
+        .await;
+
+    env_clone
+        .exec_transaction_execute_commands(
+            TestUtils::exec_command(),
+            &server_address_1,
+            "*1\r\n:6\r\n".to_string(),
+        )
+        .await;
+}
