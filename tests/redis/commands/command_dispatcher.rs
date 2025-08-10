@@ -253,3 +253,40 @@ async fn test_handle_discard_command_without_using_multi_before() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn test_handle_should_run_all_queued_commands_even_if_errors_occur() {
+    let mut env = TestEnv::new();
+
+    env.exec_transaction_immediate_response(
+        TestUtils::multi_command(),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("OK"),
+    )
+    .await;
+
+    env.exec_transaction_immediate_response(
+        TestUtils::set_command("grapes", "string"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("QUEUED"),
+    )
+    .await;
+
+    env.exec_transaction_immediate_response(
+        TestUtils::incr_command("grapes"),
+        &TestUtils::server_addr(41844),
+        &TestUtils::expected_simple_string("QUEUED"),
+    )
+    .await;
+
+    env.exec_transaction_execute_commands(
+        TestUtils::exec_command(),
+        &TestUtils::server_addr(41844),
+        "*2\r\n+OK\r\n-ERR value is not an integer or out of range\r\n".to_string(),
+    )
+    .await;
+
+    let mut state_guard = env.get_state().await;
+    let transaction = state_guard.get_transaction(&TestUtils::server_addr(41844));
+    assert_eq!(transaction, None);
+}
