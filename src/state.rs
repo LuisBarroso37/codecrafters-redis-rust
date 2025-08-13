@@ -29,7 +29,7 @@ impl StateError {
 #[derive(Debug)]
 pub struct BlpopSubscriber {
     /// The server address of the waiting client
-    pub server_address: String,
+    pub client_address: String,
     /// Channel to send notification when an element is available
     pub sender: oneshot::Sender<bool>,
 }
@@ -42,7 +42,7 @@ pub struct BlpopSubscriber {
 #[derive(Debug, Clone)]
 pub struct XreadSubscriber {
     /// The server address of the waiting client
-    pub server_address: String,
+    pub client_address: String,
     /// Channel to send notification when new stream entries are available
     pub sender: mpsc::Sender<bool>,
 }
@@ -102,10 +102,10 @@ impl State {
     /// # Arguments
     ///
     /// * `key` - The list key to remove the subscriber from
-    /// * `server_address` - The server address of the client to remove
-    pub fn remove_blpop_subscriber(&mut self, key: &str, server_address: &str) {
+    /// * `client_address` - The server address of the client to remove
+    pub fn remove_blpop_subscriber(&mut self, key: &str, client_address: &str) {
         if let Some(subscriber_vec) = self.blpop_subscribers.get_mut(key) {
-            subscriber_vec.retain(|subscriber| subscriber.server_address != server_address);
+            subscriber_vec.retain(|subscriber| subscriber.client_address != client_address);
         }
     }
 
@@ -169,11 +169,11 @@ impl State {
     ///
     /// * `key` - The stream key to remove the subscriber from
     /// * `stream_id` - The stream ID to remove the subscriber from
-    /// * `server_address` - The server address of the client to remove
-    pub fn remove_xread_subscriber(&mut self, key: &str, stream_id: &str, server_address: &str) {
+    /// * `client_address` - The server address of the client to remove
+    pub fn remove_xread_subscriber(&mut self, key: &str, stream_id: &str, client_address: &str) {
         if let Some(streams) = self.xread_subscribers.get_mut(key) {
             if let Some(subscriber_vec) = streams.get_mut(stream_id) {
-                subscriber_vec.retain(|subscriber| subscriber.server_address != server_address);
+                subscriber_vec.retain(|subscriber| subscriber.client_address != client_address);
             }
         }
     }
@@ -239,26 +239,26 @@ impl State {
         return Ok(());
     }
 
-    pub fn start_transaction(&mut self, server_address: String) -> Result<(), StateError> {
-        match self.transactions.get_mut(&server_address) {
+    pub fn start_transaction(&mut self, client_address: String) -> Result<(), StateError> {
+        match self.transactions.get_mut(&client_address) {
             Some(_) => Err(StateError::TransactionAlreadyStarted),
             None => {
-                self.transactions.insert(server_address, Vec::new());
+                self.transactions.insert(client_address, Vec::new());
                 Ok(())
             }
         }
     }
 
-    pub fn get_transaction(&mut self, server_address: &str) -> Option<&Vec<CommandHandler>> {
-        self.transactions.get(server_address)
+    pub fn get_transaction(&mut self, client_address: &str) -> Option<&Vec<CommandHandler>> {
+        self.transactions.get(client_address)
     }
 
     pub fn add_to_transaction(
         &mut self,
-        server_address: String,
+        client_address: String,
         command: CommandHandler,
     ) -> Result<(), StateError> {
-        match self.transactions.get_mut(&server_address) {
+        match self.transactions.get_mut(&client_address) {
             Some(transactions) => {
                 transactions.push(command);
                 Ok(())
@@ -269,9 +269,9 @@ impl State {
 
     pub fn remove_transaction(
         &mut self,
-        server_address: String,
+        client_address: String,
     ) -> Result<Vec<CommandHandler>, StateError> {
-        match self.transactions.remove(&server_address) {
+        match self.transactions.remove(&client_address) {
             Some(transaction) => Ok(transaction),
             None => Err(StateError::NoTransactionInProgress),
         }
@@ -295,7 +295,7 @@ mod tests {
         let mut state = State::new();
         let (sender, _receiver) = oneshot::channel();
         let subscriber = BlpopSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender,
         };
 
@@ -312,14 +312,14 @@ mod tests {
 
         let (sender1, _receiver1) = oneshot::channel();
         let subscriber1 = BlpopSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_blpop_subscriber("mylist".to_string(), subscriber1);
 
         let (sender2, _receiver2) = oneshot::channel();
         let subscriber2 = BlpopSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_blpop_subscriber("mylist".to_string(), subscriber2);
@@ -334,14 +334,14 @@ mod tests {
 
         let (sender1, _receiver1) = oneshot::channel();
         let subscriber1 = BlpopSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_blpop_subscriber("mylist".to_string(), subscriber1);
 
         let (sender2, _receiver2) = oneshot::channel();
         let subscriber2 = BlpopSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_blpop_subscriber("mylist".to_string(), subscriber2);
@@ -350,7 +350,7 @@ mod tests {
 
         assert_eq!(state.blpop_subscribers["mylist"].len(), 1);
         assert_eq!(
-            state.blpop_subscribers["mylist"][0].server_address,
+            state.blpop_subscribers["mylist"][0].client_address,
             "127.0.0.1:8081"
         );
     }
@@ -369,7 +369,7 @@ mod tests {
         let mut state = State::new();
         let (sender, receiver) = oneshot::channel();
         let subscriber = BlpopSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender,
         };
 
@@ -399,14 +399,14 @@ mod tests {
         // Add two subscribers
         let (sender1, receiver1) = oneshot::channel();
         let subscriber1 = BlpopSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_blpop_subscriber("mylist".to_string(), subscriber1);
 
         let (sender2, receiver2) = oneshot::channel();
         let subscriber2 = BlpopSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_blpop_subscriber("mylist".to_string(), subscriber2);
@@ -422,7 +422,7 @@ mod tests {
         // Second subscriber should still be waiting
         assert_eq!(state.blpop_subscribers["mylist"].len(), 1);
         assert_eq!(
-            state.blpop_subscribers["mylist"][0].server_address,
+            state.blpop_subscribers["mylist"][0].client_address,
             "127.0.0.1:8081"
         );
 
@@ -440,7 +440,7 @@ mod tests {
         let mut state = State::new();
         let (sender, _receiver) = mpsc::channel(1);
         let subscriber = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender,
         };
 
@@ -460,14 +460,14 @@ mod tests {
         let mut state = State::new();
         let (sender1, _receiver1) = mpsc::channel(1);
         let subscriber1 = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_xread_subscriber("mystream".to_string(), "1234-0".to_string(), subscriber1);
 
         let (sender2, _receiver2) = mpsc::channel(1);
         let subscriber2 = XreadSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_xread_subscriber("mystream".to_string(), "1235-0".to_string(), subscriber2);
@@ -489,14 +489,14 @@ mod tests {
         let mut state = State::new();
         let (sender1, _receiver1) = mpsc::channel(1);
         let subscriber1 = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_xread_subscriber("mystream".to_string(), "1234-0".to_string(), subscriber1);
 
         let (sender2, _receiver2) = mpsc::channel(1);
         let subscriber2 = XreadSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_xread_subscriber("mystream".to_string(), "1234-0".to_string(), subscriber2);
@@ -511,14 +511,14 @@ mod tests {
         let mut state = State::new();
         let (sender1, _receiver1) = mpsc::channel(1);
         let subscriber1 = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_xread_subscriber("mystream".to_string(), "1234-0".to_string(), subscriber1);
 
         let (sender2, _receiver2) = mpsc::channel(1);
         let subscriber2 = XreadSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_xread_subscriber("mystream".to_string(), "1234-0".to_string(), subscriber2);
@@ -527,7 +527,7 @@ mod tests {
 
         assert_eq!(state.xread_subscribers["mystream"]["1234-0"].len(), 1);
         assert_eq!(
-            state.xread_subscribers["mystream"]["1234-0"][0].server_address,
+            state.xread_subscribers["mystream"]["1234-0"][0].client_address,
             "127.0.0.1:8081"
         );
     }
@@ -568,7 +568,7 @@ mod tests {
         let mut state = State::new();
         let (sender, mut receiver) = mpsc::channel(1);
         let subscriber = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender,
         };
 
@@ -594,7 +594,7 @@ mod tests {
         let mut state = State::new();
         let (sender, mut receiver) = mpsc::channel(1);
         let subscriber = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender,
         };
 
@@ -625,14 +625,14 @@ mod tests {
 
         let (sender1, mut receiver1) = mpsc::channel(1);
         let subscriber1 = XreadSubscriber {
-            server_address: "127.0.0.1:8080".to_string(),
+            client_address: "127.0.0.1:8080".to_string(),
             sender: sender1,
         };
         state.add_xread_subscriber("mystream".to_string(), "1233-0".to_string(), subscriber1);
 
         let (sender2, mut receiver2) = mpsc::channel(1);
         let subscriber2 = XreadSubscriber {
-            server_address: "127.0.0.1:8081".to_string(),
+            client_address: "127.0.0.1:8081".to_string(),
             sender: sender2,
         };
         state.add_xread_subscriber("mystream".to_string(), "1233-5".to_string(), subscriber2);

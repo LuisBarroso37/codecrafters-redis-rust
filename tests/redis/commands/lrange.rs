@@ -4,14 +4,14 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_lrange_command() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::rpush_command(
             "grape",
             &["mango", "raspberry", "apple", "banana", "kiwi", "pear"],
         ),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(6),
     )
     .await;
@@ -33,14 +33,18 @@ async fn test_handle_lrange_command() {
     ];
 
     for (command, expected_response) in test_cases {
-        env.exec_command_ok(command, &TestUtils::server_addr(41844), expected_response)
-            .await;
+        env.exec_command_ok(
+            command,
+            &TestUtils::client_address(41844),
+            expected_response,
+        )
+        .await;
     }
 }
 
 #[tokio::test]
 async fn test_handle_lrange_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
         (
@@ -54,7 +58,7 @@ async fn test_handle_lrange_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
             .await;
     }
 }

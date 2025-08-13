@@ -1,4 +1,8 @@
-use crate::{commands::CommandError, resp::RespValue};
+use std::sync::Arc;
+
+use tokio::sync::RwLock;
+
+use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
 
 enum InfoSection {
     DEFAULT,
@@ -30,12 +34,21 @@ impl InfoArguments {
     }
 }
 
-pub fn info(arguments: Vec<String>) -> Result<String, CommandError> {
+pub async fn info(
+    server: &Arc<RwLock<RedisServer>>,
+    arguments: Vec<String>,
+) -> Result<String, CommandError> {
     let info_arguments = InfoArguments::parse(arguments)?;
 
     // $92\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\nmaster_repl_offset:0\r\n
+    let server_guard = server.read().await;
+
     match info_arguments.section {
-        InfoSection::DEFAULT => Ok(RespValue::BulkString("role:master".to_string()).encode()),
-        InfoSection::REPLICATION => Ok(RespValue::BulkString("role:master".to_string()).encode()),
+        InfoSection::DEFAULT => {
+            Ok(RespValue::BulkString(format!("role:{}", server_guard.role.as_string())).encode())
+        }
+        InfoSection::REPLICATION => {
+            Ok(RespValue::BulkString(format!("role:{}", server_guard.role.as_string())).encode())
+        }
     }
 }

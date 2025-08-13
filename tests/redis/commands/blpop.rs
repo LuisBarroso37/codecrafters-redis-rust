@@ -6,18 +6,18 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_blpop_command_direct_response() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
 
     env.exec_command_ok(
         TestUtils::blpop_command("grape", "0"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&["grape", "mango"]),
     )
     .await;
@@ -25,11 +25,11 @@ async fn test_handle_blpop_command_direct_response() {
 
 #[tokio::test]
 async fn test_blpop_concurrent_clients_simple_blocking() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     // Client tries to BLPOP from empty list (should block)
     let client_task =
-        TestUtils::spawn_blpop_task(&env, "test_list", "2", &TestUtils::server_addr(12345));
+        TestUtils::spawn_blpop_task(&env, "test_list", "2", &TestUtils::client_address(12345));
 
     // Give client time to register as subscriber
     TestUtils::sleep_ms(500).await;
@@ -40,7 +40,7 @@ async fn test_blpop_concurrent_clients_simple_blocking() {
     env_mut
         .exec_command_ok(
             TestUtils::rpush_command("test_list", &["item1"]),
-            &TestUtils::server_addr(12347),
+            &TestUtils::client_address(12347),
             &TestUtils::expected_integer(1),
         )
         .await;
@@ -60,11 +60,11 @@ async fn test_blpop_concurrent_clients_simple_blocking() {
 
 #[tokio::test]
 async fn test_blpop_concurrent_clients_first_come_first_served() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::rpush_command("test_queue", &["single_item"]),
-        &TestUtils::server_addr(12340),
+        &TestUtils::client_address(12340),
         &TestUtils::expected_integer(1),
     )
     .await;
@@ -105,7 +105,7 @@ async fn test_blpop_concurrent_clients_first_come_first_served() {
 
 #[tokio::test]
 async fn test_blpop_timeout_behavior() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let start_time = std::time::Instant::now();
 
@@ -113,7 +113,7 @@ async fn test_blpop_timeout_behavior() {
     // Should timeout and return null
     env.exec_command_ok(
         TestUtils::blpop_command("empty_list", "1"),
-        &TestUtils::server_addr(12350),
+        &TestUtils::client_address(12350),
         &TestUtils::expected_null(),
     )
     .await;
@@ -127,14 +127,14 @@ async fn test_blpop_timeout_behavior() {
 
 #[tokio::test]
 async fn test_blpop_zero_timeout_infinite_wait() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     // Client tries BLPOP with zero timeout (infinite wait)
     let blpop_task = TestUtils::spawn_blpop_task(
         &env,
         "infinite_list",
         "0", // Infinite timeout
-        &TestUtils::server_addr(12351),
+        &TestUtils::client_address(12351),
     );
 
     // Wait a bit to ensure the client is blocking
@@ -146,7 +146,7 @@ async fn test_blpop_zero_timeout_infinite_wait() {
     env_mut
         .exec_command_ok(
             TestUtils::rpush_command("infinite_list", &["unblock_item"]),
-            &TestUtils::server_addr(12352),
+            &TestUtils::client_address(12352),
             &TestUtils::expected_integer(1),
         )
         .await;
@@ -165,7 +165,7 @@ async fn test_blpop_zero_timeout_infinite_wait() {
 
 #[tokio::test]
 async fn test_blpop_multiple_pushes_multiple_clients() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     // Start multiple BLPOP clients
     let mut blpop_tasks = vec![];
@@ -227,12 +227,12 @@ async fn test_blpop_multiple_pushes_multiple_clients() {
 
 #[tokio::test]
 async fn test_blpop_with_existing_items_concurrent() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     // Pre-populate the list with multiple items
     env.exec_command_ok(
         TestUtils::rpush_command("existing_queue", &["existing1", "existing2", "existing3"]),
-        &TestUtils::server_addr(12380),
+        &TestUtils::client_address(12380),
         &TestUtils::expected_integer(3),
     )
     .await;
@@ -269,7 +269,7 @@ async fn test_blpop_with_existing_items_concurrent() {
     env_mut
         .exec_command_ok(
             TestUtils::llen_command("existing_queue"),
-            &TestUtils::server_addr(12390),
+            &TestUtils::client_address(12390),
             &TestUtils::expected_integer(0),
         )
         .await;
@@ -277,18 +277,18 @@ async fn test_blpop_with_existing_items_concurrent() {
 
 #[tokio::test]
 async fn test_blpop_invalid_arguments() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_err(
         TestUtils::invalid_command(&["BLPOP", "test_list"]),
-        &TestUtils::server_addr(12400),
+        &TestUtils::client_address(12400),
         CommandError::InvalidBLPopCommand,
     )
     .await;
 
     env.exec_command_err(
         TestUtils::blpop_command("test_list", "invalid"),
-        &TestUtils::server_addr(12401),
+        &TestUtils::client_address(12401),
         CommandError::InvalidBLPopCommandArgument,
     )
     .await;
@@ -296,7 +296,7 @@ async fn test_blpop_invalid_arguments() {
 
 #[tokio::test]
 async fn test_blpop_concurrent_different_keys() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     // Start clients waiting on different keys
     let mut tasks = HashMap::new();
@@ -320,7 +320,7 @@ async fn test_blpop_concurrent_different_keys() {
 
         env.exec_command_ok(
             TestUtils::rpush_command(&key_name, &[format!("value_{}", i).as_str()]),
-            &TestUtils::server_addr(server_port),
+            &TestUtils::client_address(server_port),
             &TestUtils::expected_integer(1),
         )
         .await;
@@ -347,7 +347,7 @@ async fn test_blpop_concurrent_different_keys() {
 
 #[tokio::test]
 async fn test_handle_blpop_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
         (
@@ -361,7 +361,7 @@ async fn test_handle_blpop_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
             .await;
     }
 }

@@ -115,7 +115,7 @@ impl XreadArguments {
 ///
 /// # Arguments
 ///
-/// * `server_address` - Unique identifier for this server instance (used for subscriber management)
+/// * `client_address` - Unique identifier for the client instance (used for subscriber management)
 /// * `store` - Thread-safe reference to the key-value store
 /// * `state` - Thread-safe reference to server state (manages subscribers for blocking operations)
 /// * `arguments` - Command arguments in the format: [BLOCK ms] STREAMS key1 key2 ... id1 id2 ...
@@ -149,7 +149,7 @@ impl XreadArguments {
 /// ).await?;
 /// ```
 pub async fn xread(
-    server_address: String,
+    client_address: String,
     store: &mut Arc<Mutex<KeyValueStore>>,
     state: &mut Arc<Mutex<State>>,
     arguments: Vec<String>,
@@ -176,13 +176,13 @@ pub async fn xread(
     add_subscribers(
         state,
         &parsed_stream_ids,
-        server_address.clone(),
+        client_address.clone(),
         sender.clone(),
     )
     .await;
 
     let result = wait_for_data(&mut receiver, blocking_duration_ms).await;
-    remove_subscribers(state, &parsed_stream_ids, &server_address).await;
+    remove_subscribers(state, &parsed_stream_ids, &client_address).await;
 
     match result {
         Some(_) => read_streams(store, parsed_stream_ids).await,
@@ -289,17 +289,17 @@ async fn resolve_special_id(
 ///
 /// * `state` - Thread-safe reference to server state
 /// * `key_stream_id_pairs` - Stream keys and IDs to subscribe to
-/// * `server_address` - Unique identifier for this server instance
+/// * `client_address` - Unique identifier for the client instance
 /// * `sender` - Channel sender for notifications
 async fn add_subscribers(
     state: &mut Arc<Mutex<State>>,
     key_stream_id_pairs: &Vec<(String, String)>,
-    server_address: String,
+    client_address: String,
     sender: mpsc::Sender<bool>,
 ) {
     for (key, stream_id) in key_stream_id_pairs {
         let subscriber = XreadSubscriber {
-            server_address: server_address.clone(),
+            client_address: client_address.clone(),
             sender: sender.clone(),
         };
 
@@ -317,16 +317,16 @@ async fn add_subscribers(
 ///
 /// * `state` - Thread-safe reference to server state
 /// * `key_stream_id_pairs` - Stream keys and IDs to unsubscribe from
-/// * `server_address` - Server instance identifier used during subscription
+/// * `client_address` - Client instance identifier used during subscription
 async fn remove_subscribers(
     state: &mut Arc<Mutex<State>>,
     key_stream_id_pairs: &Vec<(String, String)>,
-    server_address: &str,
+    client_address: &str,
 ) {
     let mut state_guard = state.lock().await;
 
     for (key, stream_id) in key_stream_id_pairs {
-        state_guard.remove_xread_subscriber(key, stream_id, &server_address);
+        state_guard.remove_xread_subscriber(key, stream_id, &client_address);
     }
 }
 
@@ -676,12 +676,12 @@ mod tests {
             ("stream2".to_string(), "2000-0".to_string()),
         ];
 
-        let server_address = "server-1".to_string();
+        let client_address = "server-1".to_string();
 
         add_subscribers(
             &mut state,
             &key_stream_pairs,
-            server_address.clone(),
+            client_address.clone(),
             sender,
         )
         .await;
@@ -697,7 +697,7 @@ mod tests {
                     .map(|subscribers| {
                         subscribers
                             .iter()
-                            .any(|sub| sub.server_address == server_address)
+                            .any(|sub| sub.client_address == client_address)
                     })
                     .unwrap_or(false);
 
@@ -709,7 +709,7 @@ mod tests {
             }
         }
 
-        remove_subscribers(&mut state, &key_stream_pairs, &server_address).await;
+        remove_subscribers(&mut state, &key_stream_pairs, &client_address).await;
 
         {
             let state_guard = state.lock().await;
@@ -722,7 +722,7 @@ mod tests {
                     .map(|subscribers| {
                         subscribers
                             .iter()
-                            .any(|sub| sub.server_address == server_address)
+                            .any(|sub| sub.client_address == client_address)
                     })
                     .unwrap_or(false);
 

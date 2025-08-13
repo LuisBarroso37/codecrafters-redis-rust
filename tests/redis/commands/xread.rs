@@ -6,7 +6,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_xread_command() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     for key in vec!["fruits", "exotic fruits"] {
         for i in 0..=1 {
@@ -21,7 +21,7 @@ async fn test_handle_xread_command() {
                         &stream_id,
                         &["mango", "apple", "raspberry", "pear"],
                     ),
-                    &TestUtils::server_addr(41844),
+                    &TestUtils::client_address(41844),
                     &TestUtils::expected_bulk_string(&stream_id),
                 )
                 .await;
@@ -56,7 +56,7 @@ async fn test_handle_xread_command() {
     for (keys, start_stream_ids, expected_response) in test_cases {
         env.exec_command_ok(
             TestUtils::xread_command(keys, start_stream_ids),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             expected_response,
         )
         .await;
@@ -65,7 +65,7 @@ async fn test_handle_xread_command() {
 
 #[tokio::test]
 async fn test_handle_xread_command_zero_zero_allowed() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     for i in 1..=2 {
         let stream_id = format!("0-{}", i);
@@ -76,7 +76,7 @@ async fn test_handle_xread_command_zero_zero_allowed() {
                 &stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string(&stream_id),
         )
         .await;
@@ -84,7 +84,7 @@ async fn test_handle_xread_command_zero_zero_allowed() {
 
     env.exec_command_ok(
         TestUtils::xread_command(&["fruits"], &["0-0"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         "*1\r\n*2\r\n$6\r\nfruits\r\n*2\r\n*2\r\n$3\r\n0-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$3\r\n0-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
     )
     .await;
@@ -92,7 +92,7 @@ async fn test_handle_xread_command_zero_zero_allowed() {
 
 #[tokio::test]
 async fn test_handle_xread_command_data_not_found() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     for i in 0..=1 {
         let stream_id = format!("1526919030404-{}", i);
@@ -103,7 +103,7 @@ async fn test_handle_xread_command_data_not_found() {
                 &stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string(&stream_id),
         )
         .await;
@@ -111,7 +111,7 @@ async fn test_handle_xread_command_data_not_found() {
 
     env.exec_command_ok(
         TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         "*0\r\n",
     )
     .await;
@@ -119,18 +119,18 @@ async fn test_handle_xread_command_data_not_found() {
 
 #[tokio::test]
 async fn test_handle_xread_command_invalid_data_type() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command("fruit", "mango"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
     env.exec_command_err(
         TestUtils::xread_command(&["fruit"], &["1526919030424-0"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         CommandError::InvalidDataTypeForKey,
     )
     .await;
@@ -138,11 +138,11 @@ async fn test_handle_xread_command_invalid_data_type() {
 
 #[tokio::test]
 async fn test_handle_xread_command_key_not_found() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&[]),
     )
     .await;
@@ -150,7 +150,7 @@ async fn test_handle_xread_command_key_not_found() {
 
 #[tokio::test]
 async fn test_handle_xread_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
         (
@@ -207,14 +207,14 @@ async fn test_handle_xread_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
             .await;
     }
 }
 
 #[tokio::test]
 async fn test_handle_xread_blocking_command_direct_response() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
@@ -225,14 +225,14 @@ async fn test_handle_xread_blocking_command_direct_response() {
             &added_stream_id,
             &["mango", "apple", "raspberry", "pear"],
         ),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string(&added_stream_id),
     )
     .await;
 
     env.exec_command_ok(
         TestUtils::xread_blocking_command("0", &["fruits"], &[start_stream_id]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         "*1\r\n*2\r\n$6\r\nfruits\r\n*1\r\n*2\r\n$15\r\n1526919030404-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
     )
     .await;
@@ -240,7 +240,7 @@ async fn test_handle_xread_blocking_command_direct_response() {
 
 #[tokio::test]
 async fn test_xread_simple_blocking() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
@@ -251,7 +251,7 @@ async fn test_xread_simple_blocking() {
         &["fruits"],
         &[start_stream_id],
         "2000",
-        &TestUtils::server_addr(12345),
+        &TestUtils::client_address(12345),
     );
 
     // Give client time to register as subscriber
@@ -267,7 +267,7 @@ async fn test_xread_simple_blocking() {
                 added_stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string(added_stream_id),
         )
         .await;
@@ -281,7 +281,7 @@ async fn test_xread_simple_blocking() {
 
 #[tokio::test]
 async fn test_xread_blocking_timeout_behavior() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let start_time = std::time::Instant::now();
 
@@ -289,7 +289,7 @@ async fn test_xread_blocking_timeout_behavior() {
     // Should timeout and return null
     env.exec_command_ok(
         TestUtils::xread_blocking_command("1000", &["empty_stream"], &["1526919030404-1"]),
-        &TestUtils::server_addr(12350),
+        &TestUtils::client_address(12350),
         &TestUtils::expected_null(),
     )
     .await;
@@ -303,7 +303,7 @@ async fn test_xread_blocking_timeout_behavior() {
 
 #[tokio::test]
 async fn test_xread_zero_timeout_infinite_wait() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
@@ -314,7 +314,7 @@ async fn test_xread_zero_timeout_infinite_wait() {
         &["fruits"],
         &[start_stream_id],
         "0", // Infinite timeout
-        &TestUtils::server_addr(12351),
+        &TestUtils::client_address(12351),
     );
 
     // Wait a bit to ensure the client is blocking
@@ -330,7 +330,7 @@ async fn test_xread_zero_timeout_infinite_wait() {
                 added_stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string(added_stream_id),
         )
         .await;
@@ -343,7 +343,7 @@ async fn test_xread_zero_timeout_infinite_wait() {
 
 #[tokio::test]
 async fn test_xread_concurrent_clients_direct_response() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
@@ -355,7 +355,7 @@ async fn test_xread_concurrent_clients_direct_response() {
             &added_stream_id,
             &["mango", "apple", "raspberry", "pear"],
         ),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string(&added_stream_id),
     )
     .await;
@@ -404,7 +404,7 @@ async fn test_xread_concurrent_clients_direct_response() {
 
 #[tokio::test]
 async fn test_xread_concurrent_clients_different_keys() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
@@ -437,7 +437,7 @@ async fn test_xread_concurrent_clients_different_keys() {
 
         env.exec_command_ok(
             TestUtils::xadd_command(&key_name, &added_stream_id, &["mango", "apple"]),
-            &TestUtils::server_addr(server_port),
+            &TestUtils::client_address(server_port),
             &TestUtils::expected_bulk_string(&added_stream_id),
         )
         .await;
@@ -464,7 +464,7 @@ async fn test_xread_concurrent_clients_different_keys() {
 
 #[tokio::test]
 async fn test_xread_concurrent_clients_multiple_pushes_with_incremental_stream_ids() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     // Start multiple XREAD clients
     let mut xread_tasks = vec![];
@@ -535,7 +535,7 @@ async fn test_xread_concurrent_clients_multiple_pushes_with_incremental_stream_i
 
 #[tokio::test]
 async fn test_xread_concurrent_clients_fanout() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
@@ -570,7 +570,7 @@ async fn test_xread_concurrent_clients_fanout() {
                 &added_stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41882),
+            &TestUtils::client_address(41882),
             &TestUtils::expected_bulk_string(&added_stream_id),
         )
         .await;
@@ -601,14 +601,14 @@ async fn test_xread_concurrent_clients_fanout() {
 
 #[tokio::test]
 async fn test_xread_simple_blocking_with_special_id_return_immediately_if_stream_is_empty() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
     // Client tries to XREAD from empty stream (should immediately return)
     let client_task = TestUtils::spawn_xread_task(
         &env,
         &["fruits"],
         &["$"],
         "2000",
-        &TestUtils::server_addr(12345),
+        &TestUtils::client_address(12345),
     );
 
     // Wait for client to complete
@@ -620,7 +620,7 @@ async fn test_xread_simple_blocking_with_special_id_return_immediately_if_stream
 
 #[tokio::test]
 async fn test_xread_simple_blocking_with_special_id() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::xadd_command(
@@ -628,7 +628,7 @@ async fn test_xread_simple_blocking_with_special_id() {
             "1526919030404-0",
             &["mango", "apple", "raspberry", "pear"],
         ),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("1526919030404-0"),
     )
     .await;
@@ -639,7 +639,7 @@ async fn test_xread_simple_blocking_with_special_id() {
         &["fruits"],
         &["$"],
         "2000",
-        &TestUtils::server_addr(12345),
+        &TestUtils::client_address(12345),
     );
 
     // Give client time to register as subscriber
@@ -655,7 +655,7 @@ async fn test_xread_simple_blocking_with_special_id() {
                 "1526919030404-1",
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
         )
         .await;
@@ -669,7 +669,7 @@ async fn test_xread_simple_blocking_with_special_id() {
 
 #[tokio::test]
 async fn test_xread_multiple_streams_single_client() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     let start_stream_id_fruits = "1526919030404-0";
     let start_stream_id_vegetables = "1526919030404-0";
@@ -680,7 +680,7 @@ async fn test_xread_multiple_streams_single_client() {
         &["fruits", "vegetables"],
         &[start_stream_id_fruits, start_stream_id_vegetables],
         "3000",
-        &TestUtils::server_addr(12345),
+        &TestUtils::client_address(12345),
     );
 
     // Give client time to register as subscriber
@@ -692,7 +692,7 @@ async fn test_xread_multiple_streams_single_client() {
     env_mut
         .exec_command_ok(
             TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
         )
         .await;
@@ -700,7 +700,7 @@ async fn test_xread_multiple_streams_single_client() {
     env_mut
         .exec_command_ok(
             TestUtils::xadd_command("vegetables", "1526919030404-1", &["carrot", "potato"]),
-            &TestUtils::server_addr(41845),
+            &TestUtils::client_address(41845),
             &TestUtils::expected_bulk_string("1526919030404-1"),
         )
         .await;
@@ -719,7 +719,7 @@ async fn test_xread_multiple_streams_single_client() {
 
 #[tokio::test]
 async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
 
@@ -729,7 +729,7 @@ async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
         &["fruits", "vegetables"],
         &[start_stream_id, start_stream_id],
         "3000",
-        &TestUtils::server_addr(12345),
+        &TestUtils::client_address(12345),
     );
 
     // Client 2 listens to only vegetables and animals
@@ -738,7 +738,7 @@ async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
         &["vegetables", "animals"],
         &[start_stream_id, start_stream_id],
         "800",
-        &TestUtils::server_addr(12346),
+        &TestUtils::client_address(12346),
     );
 
     // Give clients time to register
@@ -750,7 +750,7 @@ async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
     env_mut
         .exec_command_ok(
             TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
         )
         .await;
@@ -773,7 +773,7 @@ async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
 
 #[tokio::test]
 async fn test_xread_multiple_streams_concurrent_clients_same_streams() {
-    let env = TestEnv::new();
+    let env = TestEnv::new_master_server();
 
     let start_stream_id = "1526919030404-0";
 
@@ -801,7 +801,7 @@ async fn test_xread_multiple_streams_concurrent_clients_same_streams() {
     env_mut
         .exec_command_ok(
             TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
         )
         .await;
@@ -832,19 +832,19 @@ async fn test_xread_multiple_streams_concurrent_clients_same_streams() {
 
 #[tokio::test]
 async fn test_xread_multiple_streams_concurrent_clients_special_ids() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     // Pre-populate both streams
     env.exec_command_ok(
         TestUtils::xadd_command("fruits", "1526919030404-0", &["orange", "banana"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("1526919030404-0"),
     )
     .await;
 
     env.exec_command_ok(
         TestUtils::xadd_command("vegetables", "1526919030404-0", &["onion", "garlic"]),
-        &TestUtils::server_addr(41845),
+        &TestUtils::client_address(41845),
         &TestUtils::expected_bulk_string("1526919030404-0"),
     )
     .await;
@@ -870,14 +870,14 @@ async fn test_xread_multiple_streams_concurrent_clients_special_ids() {
     // Push new entries to both streams
     env.exec_command_ok(
         TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("1526919030404-1"),
     )
     .await;
 
     env.exec_command_ok(
         TestUtils::xadd_command("vegetables", "1526919030404-1", &["carrot", "potato"]),
-        &TestUtils::server_addr(41845),
+        &TestUtils::client_address(41845),
         &TestUtils::expected_bulk_string("1526919030404-1"),
     )
     .await;

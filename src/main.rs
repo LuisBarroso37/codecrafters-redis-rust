@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    sync::Mutex,
+    sync::{Mutex, RwLock},
 };
 
 use crate::{
@@ -40,6 +40,7 @@ async fn main() {
 
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
     let state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
+    let server: Arc<RwLock<RedisServer>> = Arc::new(RwLock::new(server));
 
     // Accept connections and spawn tasks to handle each client
     loop {
@@ -47,6 +48,7 @@ async fn main() {
             Ok((mut stream, _addr)) => {
                 let mut store = Arc::clone(&store);
                 let mut state = Arc::clone(&state);
+                let server = Arc::clone(&server);
 
                 // Handle each client connection in a separate task
                 tokio::spawn(async move {
@@ -77,7 +79,7 @@ async fn main() {
                             }
                         };
 
-                        let server_address = match stream.peer_addr() {
+                        let client_address = match stream.peer_addr() {
                             Ok(address) => address.to_string(),
                             Err(_) => {
                                 let _ = stream.write_all(b"ERR failed to get server address").await;
@@ -94,7 +96,7 @@ async fn main() {
                         };
 
                         let dispatch_result =
-                            match CommandDispatcher::new(server_address.clone(), state.clone())
+                            match CommandDispatcher::new(client_address.clone(), state.clone())
                                 .dispatch_command(command_handler)
                                 .await
                             {
@@ -106,7 +108,7 @@ async fn main() {
                             };
 
                         let response = dispatch_result
-                            .handle_dispatch_result(server_address, &mut store, &mut state)
+                            .handle_dispatch_result(&server, client_address, &mut store, &mut state)
                             .await;
                         let _ = stream.write_all(response.as_bytes()).await;
                     }

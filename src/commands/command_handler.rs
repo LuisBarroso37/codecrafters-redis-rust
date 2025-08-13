@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     commands::{
@@ -23,6 +23,7 @@ use crate::{
     },
     key_value_store::KeyValueStore,
     resp::RespValue,
+    server::RedisServer,
     state::State,
 };
 
@@ -145,7 +146,7 @@ impl CommandHandler {
     ///
     /// # Arguments
     ///
-    /// * `server_address` - The address of the current Redis server instance
+    /// * `client_address` - The address of the current client server instance
     /// * `store` - A thread-safe reference to the key-value store
     /// * `state` - A thread-safe reference to the server state (for blocking operations)
     ///
@@ -164,7 +165,8 @@ impl CommandHandler {
     /// - Utility: TYPE
     pub async fn handle_command(
         &self,
-        server_address: String,
+        server: &Arc<RwLock<RedisServer>>,
+        client_address: String,
         store: &mut Arc<Mutex<KeyValueStore>>,
         state: &mut Arc<Mutex<State>>,
     ) -> Result<String, CommandError> {
@@ -178,13 +180,13 @@ impl CommandHandler {
             "LRANGE" => lrange(store, self.arguments.clone()).await,
             "LLEN" => llen(store, self.arguments.clone()).await,
             "LPOP" => lpop(store, self.arguments.clone()).await,
-            "BLPOP" => blpop(server_address, store, state, self.arguments.clone()).await,
+            "BLPOP" => blpop(client_address, store, state, self.arguments.clone()).await,
             "TYPE" => type_command(store, self.arguments.clone()).await,
             "XADD" => xadd(store, state, self.arguments.clone()).await,
             "XRANGE" => xrange(store, self.arguments.clone()).await,
-            "XREAD" => xread(server_address, store, state, self.arguments.clone()).await,
+            "XREAD" => xread(client_address, store, state, self.arguments.clone()).await,
             "INCR" => incr(store, self.arguments.clone()).await,
-            "INFO" => info(self.arguments.clone()),
+            "INFO" => info(server, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

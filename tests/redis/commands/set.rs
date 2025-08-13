@@ -10,11 +10,11 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_set_command() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command("grape", "mango"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
@@ -35,11 +35,11 @@ async fn test_handle_set_command_with_expiration() {
     tokio::time::pause();
     let now = Instant::now();
 
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command_with_expiration("grape", "mango", 100),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
@@ -58,7 +58,7 @@ async fn test_handle_set_command_with_expiration() {
 
 #[tokio::test]
 async fn test_handle_set_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
         (
@@ -80,7 +80,7 @@ async fn test_handle_set_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
             .await;
     }
 }

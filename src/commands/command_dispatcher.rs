@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     commands::{CommandError, CommandHandler},
     key_value_store::KeyValueStore,
     resp::RespValue,
+    server::RedisServer,
     state::{State, StateError},
 };
 
@@ -71,7 +72,7 @@ impl DispatchResult {
     ///
     /// # Arguments
     ///
-    /// * `server_address` - The address of the server instance (used for transaction context)
+    /// * `client_address` - The address of the client instance (used for transaction context)
     /// * `store` - A mutable reference to the key-value store
     /// * `state` - A mutable reference to the server state
     ///
@@ -80,7 +81,8 @@ impl DispatchResult {
     /// * `String` - A RESP-encoded response to be sent to the client
     pub async fn handle_dispatch_result(
         &self,
-        server_address: String,
+        server: &Arc<RwLock<RedisServer>>,
+        client_address: String,
         store: &mut Arc<Mutex<KeyValueStore>>,
         state: &mut Arc<Mutex<State>>,
     ) -> String {
@@ -88,7 +90,7 @@ impl DispatchResult {
             DispatchResult::ImmediateResponse(value) => value.clone(),
             DispatchResult::ExecuteSingleCommand(command) => {
                 match command
-                    .handle_command(server_address.clone(), store, state)
+                    .handle_command(server, client_address.clone(), store, state)
                     .await
                 {
                     Ok(resp) => resp,
@@ -101,7 +103,7 @@ impl DispatchResult {
 
                 for cmd in commands {
                     match cmd
-                        .handle_command(server_address.clone(), store, state)
+                        .handle_command(server, client_address.clone(), store, state)
                         .await
                     {
                         Ok(resp) => {
@@ -126,16 +128,16 @@ impl DispatchResult {
 /// command flows.
 pub struct CommandDispatcher {
     /// The address of the server instance (used for transaction context).
-    pub server_address: String,
+    pub client_address: String,
     /// Shared state for managing transactions and blocking operations.
     pub state: Arc<Mutex<State>>,
 }
 
 impl CommandDispatcher {
     /// Creates a new `CommandDispatcher` with the given server address and state.
-    pub fn new(server_address: String, state: Arc<Mutex<State>>) -> Self {
+    pub fn new(client_address: String, state: Arc<Mutex<State>>) -> Self {
         CommandDispatcher {
-            server_address,
+            client_address,
             state,
         }
     }
@@ -167,7 +169,7 @@ impl CommandDispatcher {
         match command.name.as_str() {
             "MULTI" => {
                 let mut state_guard = self.state.lock().await;
-                state_guard.start_transaction(self.server_address.clone())?;
+                state_guard.start_transaction(self.client_address.clone())?;
 
                 Ok(DispatchResult::ImmediateResponse(
                     RespValue::SimpleString("OK".to_string()).encode(),
@@ -176,7 +178,7 @@ impl CommandDispatcher {
             "EXEC" => {
                 let mut state_guard = self.state.lock().await;
 
-                let Ok(transaction) = state_guard.remove_transaction(self.server_address.clone())
+                let Ok(transaction) = state_guard.remove_transaction(self.client_address.clone())
                 else {
                     return Err(DispatchError::ExecWithoutMulti);
                 };
@@ -192,7 +194,7 @@ impl CommandDispatcher {
             "DISCARD" => {
                 let mut state_guard = self.state.lock().await;
 
-                let Ok(_) = state_guard.remove_transaction(self.server_address.clone()) else {
+                let Ok(_) = state_guard.remove_transaction(self.client_address.clone()) else {
                     return Err(DispatchError::DiscardWithoutMulti);
                 };
 
@@ -203,14 +205,14 @@ impl CommandDispatcher {
             _ => {
                 let mut state_guard = self.state.lock().await;
 
-                let Some(_) = state_guard.get_transaction(&self.server_address) else {
+                let Some(_) = state_guard.get_transaction(&self.client_address) else {
                     return Ok(DispatchResult::ExecuteSingleCommand(command));
                 };
 
                 match command.validate_command_arguments() {
                     Some(err) => return Err(DispatchError::InvalidQueueCommand(err)),
                     None => {
-                        state_guard.add_to_transaction(self.server_address.clone(), command)?;
+                        state_guard.add_to_transaction(self.client_address.clone(), command)?;
                     }
                 }
 

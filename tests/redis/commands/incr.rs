@@ -7,11 +7,11 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_incr_command() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command("grape", "5"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
@@ -29,7 +29,7 @@ async fn test_handle_incr_command() {
 
     env.exec_command_ok(
         TestUtils::incr_command("grape"),
-        &TestUtils::server_addr(41845),
+        &TestUtils::client_address(41845),
         &TestUtils::expected_integer(6),
     )
     .await;
@@ -47,7 +47,7 @@ async fn test_handle_incr_command() {
 
 #[tokio::test]
 async fn test_handle_incr_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
         (
@@ -61,14 +61,14 @@ async fn test_handle_incr_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
             .await;
     }
 }
 
 #[tokio::test]
 async fn test_handle_get_command_non_existent_key() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let store_guard = env.get_store().await;
     let value = store_guard.get("grape");
@@ -77,7 +77,7 @@ async fn test_handle_get_command_non_existent_key() {
 
     env.exec_command_ok(
         TestUtils::incr_command("grape"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(1),
     )
     .await;
@@ -95,18 +95,18 @@ async fn test_handle_get_command_non_existent_key() {
 
 #[tokio::test]
 async fn test_handle_incr_command_invalid_value() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command("grape", "not_a_number"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
     env.exec_command_err(
         TestUtils::incr_command("grape"),
-        &TestUtils::server_addr(41845),
+        &TestUtils::client_address(41845),
         CommandError::InvalidIncrValue,
     )
     .await;

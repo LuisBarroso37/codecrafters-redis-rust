@@ -92,7 +92,7 @@ impl BlpopArguments {
 ///
 /// # Arguments
 ///
-/// * `server_address` - The address of the current server (for subscriber identification)
+/// * `client_address` - The address of the current client (for subscriber identification)
 /// * `store` - A thread-safe reference to the key-value store
 /// * `state` - A thread-safe reference to the server state (for blocking operations)
 /// * `arguments` - A vector containing exactly 2 elements: [key, timeout_seconds]
@@ -114,7 +114,7 @@ impl BlpopArguments {
 /// // Returns: "*2\r\n$6\r\nmylist\r\n$5\r\nvalue\r\n" (key-value pair) or "$-1\r\n" (timeout)
 /// ```
 pub async fn blpop(
-    server_address: String,
+    client_address: String,
     store: &mut Arc<Mutex<KeyValueStore>>,
     state: &mut Arc<Mutex<State>>,
     arguments: Vec<String>,
@@ -132,13 +132,13 @@ pub async fn blpop(
     add_subscriber(
         state,
         blpop_arguments.key.clone(),
-        server_address.clone(),
+        client_address.clone(),
         sender,
     )
     .await;
 
     let data = wait_for_data(&mut receiver, blpop_arguments.block_duration_secs).await;
-    remove_subscriber(state, &blpop_arguments.key, &server_address).await;
+    remove_subscriber(state, &blpop_arguments.key, &client_address).await;
 
     if data.is_none() {
         return Ok(RespValue::NullBulkString.encode());
@@ -196,16 +196,16 @@ async fn remove_first_element_from_list(
 ///
 /// * `state` - A thread-safe reference to the server state
 /// * `key` - The key name the subscriber is waiting for
-/// * `server_address` - The address of the subscriber's server (for identification)
+/// * `client_address` - The address of the client's server (for identification)
 /// * `sender` - Oneshot sender to notify the subscriber when data becomes available
 async fn add_subscriber(
     state: &mut Arc<Mutex<State>>,
     key: String,
-    server_address: String,
+    client_address: String,
     sender: oneshot::Sender<bool>,
 ) {
     let subscriber = BlpopSubscriber {
-        server_address,
+        client_address,
         sender,
     };
 
@@ -223,10 +223,10 @@ async fn add_subscriber(
 ///
 /// * `state` - A thread-safe reference to the server state
 /// * `key` - The key name the subscriber was waiting for
-/// * `server_address` - The address of the subscriber's server (for identification)
-async fn remove_subscriber(state: &mut Arc<Mutex<State>>, key: &str, server_address: &str) {
+/// * `client_address` - The address of the client's server (for identification)
+async fn remove_subscriber(state: &mut Arc<Mutex<State>>, key: &str, client_address: &str) {
     let mut state_guard = state.lock().await;
-    state_guard.remove_blpop_subscriber(key, &server_address);
+    state_guard.remove_blpop_subscriber(key, &client_address);
 }
 
 /// Waits for data to become available on a oneshot channel with optional timeout.

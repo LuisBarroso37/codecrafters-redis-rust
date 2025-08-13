@@ -9,11 +9,11 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_lpush_command_insert() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::lpush_command("grape", &["mango", "raspberry", "apple"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
@@ -35,11 +35,11 @@ async fn test_handle_lpush_command_insert() {
 
 #[tokio::test]
 async fn test_handle_lpush_command_update() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::lpush_command("grape", &["mango", "raspberry", "apple"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
@@ -61,7 +61,7 @@ async fn test_handle_lpush_command_update() {
 
     env.exec_command_ok(
         TestUtils::lpush_command("grape", &["pear"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(4),
     )
     .await;
@@ -84,11 +84,11 @@ async fn test_handle_lpush_command_update() {
 
 #[tokio::test]
 async fn test_handle_lpush_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_err(
         TestUtils::invalid_command(&["LPUSH", "grape"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         CommandError::InvalidLPushCommand,
     )
     .await;

@@ -4,7 +4,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_xrange_command() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     for i in 0..=1 {
         let first_stream_id_part = format!("15269190304{}4", i);
@@ -18,7 +18,7 @@ async fn test_handle_xrange_command() {
                     &stream_id,
                     &["mango", "apple", "raspberry", "pear"],
                 ),
-                &TestUtils::server_addr(41844),
+                &TestUtils::client_address(41844),
                 &TestUtils::expected_bulk_string(&stream_id),
             )
             .await;
@@ -82,7 +82,7 @@ async fn test_handle_xrange_command() {
     for (start_stream_id, end_stream_id, expected_response) in test_cases {
         env.exec_command_ok(
             TestUtils::xrange_command("fruits", start_stream_id, end_stream_id),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             expected_response,
         )
         .await;
@@ -91,7 +91,7 @@ async fn test_handle_xrange_command() {
 
 #[tokio::test]
 async fn test_handle_xrange_command_data_not_found() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     for i in 0..=1 {
         let stream_id = format!("1526919030404-{}", i);
@@ -102,7 +102,7 @@ async fn test_handle_xrange_command_data_not_found() {
                 &stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string(&stream_id),
         )
         .await;
@@ -110,7 +110,7 @@ async fn test_handle_xrange_command_data_not_found() {
 
     env.exec_command_ok(
         TestUtils::xrange_command("fruits", "1526919030424-0", "1526919030424-2"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         "*0\r\n",
     )
     .await;
@@ -118,18 +118,18 @@ async fn test_handle_xrange_command_data_not_found() {
 
 #[tokio::test]
 async fn test_handle_xrange_command_invalid_data_type() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command("fruit", "mango"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &&TestUtils::expected_simple_string("OK"),
     )
     .await;
 
     env.exec_command_err(
         TestUtils::xrange_command("fruit", "1526919030424-0", "1526919030424-2"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         CommandError::InvalidDataTypeForKey,
     )
     .await;
@@ -137,7 +137,7 @@ async fn test_handle_xrange_command_invalid_data_type() {
 
 #[tokio::test]
 async fn test_handle_xrange_command_zero_zero_forbidden() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     for i in 0..=1 {
         let stream_id = format!("1526919030404-{}", i);
@@ -148,7 +148,7 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
                 &stream_id,
                 &["mango", "apple", "raspberry", "pear"],
             ),
-            &TestUtils::server_addr(41844),
+            &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string(&stream_id),
         )
         .await;
@@ -156,7 +156,7 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
 
     env.exec_command_err(
         TestUtils::xrange_command("fruits", "0-0", "0-2"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         CommandError::InvalidStreamId("Stream ID must be greater than 0-0".to_string()),
     )
     .await;
@@ -164,11 +164,11 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
 
 #[tokio::test]
 async fn test_handle_xrange_command_key_not_found() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_err(
         TestUtils::xrange_command("fruits", "1526919030424-0", "1526919030424-2"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         CommandError::DataNotFound,
     )
     .await;
@@ -176,7 +176,7 @@ async fn test_handle_xrange_command_key_not_found() {
 
 #[tokio::test]
 async fn test_handle_xrange_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
         (
@@ -196,7 +196,7 @@ async fn test_handle_xrange_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::server_addr(41844), expected_error)
+        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
             .await;
     }
 }

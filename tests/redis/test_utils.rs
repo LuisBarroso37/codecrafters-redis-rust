@@ -4,9 +4,13 @@ use codecrafters_redis::{
     commands::{CommandDispatcher, CommandError, CommandHandler, DispatchError, DispatchResult},
     key_value_store::KeyValueStore,
     resp::RespValue,
+    server::{RedisRole, RedisServer},
     state::State,
 };
-use tokio::{sync::Mutex, time::timeout};
+use tokio::{
+    sync::{Mutex, RwLock},
+    time::timeout,
+};
 
 /// Test utilities for simplifying Redis command tests
 pub struct TestUtils;
@@ -15,14 +19,31 @@ pub struct TestUtils;
 pub struct TestEnv {
     pub store: Arc<Mutex<KeyValueStore>>,
     pub state: Arc<Mutex<State>>,
+    pub server: Arc<RwLock<RedisServer>>,
 }
 
 impl TestEnv {
-    /// Create a new test environment with empty store and state
-    pub fn new() -> Self {
+    /// Create a new test environment with a master server
+    pub fn new_master_server() -> Self {
         Self {
             store: Arc::new(Mutex::new(HashMap::new())),
             state: Arc::new(Mutex::new(State::new())),
+            server: Arc::new(RwLock::new(RedisServer {
+                port: 6379,
+                role: RedisRole::Master,
+            })),
+        }
+    }
+
+    /// Create a new test environment with a replica server
+    pub fn new_replica_server(replica_port: u32) -> Self {
+        Self {
+            store: Arc::new(Mutex::new(HashMap::new())),
+            state: Arc::new(Mutex::new(State::new())),
+            server: Arc::new(RwLock::new(RedisServer {
+                port: replica_port,
+                role: RedisRole::Replica(("127.0.0.1".to_string(), 6379)),
+            })),
         }
     }
 
@@ -31,24 +52,40 @@ impl TestEnv {
         Self {
             store: Arc::clone(&self.store),
             state: Arc::clone(&self.state),
+            server: Arc::clone(&self.server),
         }
     }
 
     /// Clone the environment for use in async tasks
-    fn clone_env(&self) -> (Arc<Mutex<KeyValueStore>>, Arc<Mutex<State>>) {
-        (Arc::clone(&self.store), Arc::clone(&self.state))
+    fn clone_env(
+        &self,
+    ) -> (
+        Arc<Mutex<KeyValueStore>>,
+        Arc<Mutex<State>>,
+        Arc<RwLock<RedisServer>>,
+    ) {
+        (
+            Arc::clone(&self.store),
+            Arc::clone(&self.state),
+            Arc::clone(&self.server),
+        )
     }
 
     /// Execute a command and return the result
     async fn exec_command(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
     ) -> Result<String, CommandError> {
         let command_handler = CommandHandler::new(command)?;
 
         command_handler
-            .handle_command(server_addr.to_string(), &mut self.store, &mut self.state)
+            .handle_command(
+                &self.server,
+                client_address.to_string(),
+                &mut self.store,
+                &mut self.state,
+            )
             .await
     }
 
@@ -56,10 +93,10 @@ impl TestEnv {
     pub async fn exec_command_ok(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
         expected: &str,
     ) {
-        let result = self.exec_command(command, server_addr).await;
+        let result = self.exec_command(command, client_address).await;
         assert_eq!(result, Ok(expected.to_string()));
     }
 
@@ -67,10 +104,10 @@ impl TestEnv {
     pub async fn exec_command_err(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
         expected_error: CommandError,
     ) {
-        let result = self.exec_command(command, server_addr).await;
+        let result = self.exec_command(command, client_address).await;
         assert!(result.is_err());
         assert_eq!(result, Err(expected_error));
     }
@@ -79,10 +116,10 @@ impl TestEnv {
     async fn exec_transaction_command(
         &mut self,
         command: CommandHandler,
-        server_addr: &str,
+        client_address: &str,
     ) -> Result<DispatchResult, DispatchError> {
         let command_dispatcher =
-            CommandDispatcher::new(server_addr.to_string(), self.state.clone());
+            CommandDispatcher::new(client_address.to_string(), self.state.clone());
 
         command_dispatcher.dispatch_command(command).await
     }
@@ -91,12 +128,12 @@ impl TestEnv {
     pub async fn exec_transaction_immediate_response(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
         expected: &str,
     ) {
         let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_handler, server_addr)
+            .exec_transaction_command(command_handler, client_address)
             .await;
         assert_eq!(result.is_ok(), true);
 
@@ -112,12 +149,12 @@ impl TestEnv {
     pub async fn exec_transaction_expected_commands(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
         expected: &[CommandHandler],
     ) {
         let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_handler, server_addr)
+            .exec_transaction_command(command_handler, client_address)
             .await;
         assert_eq!(result.is_ok(), true);
 
@@ -133,12 +170,12 @@ impl TestEnv {
     pub async fn exec_transaction_err(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
         expected_error: DispatchError,
     ) {
         let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_handler, server_addr)
+            .exec_transaction_command(command_handler, client_address)
             .await;
         assert_eq!(result.is_err(), true);
         assert_eq!(result, Err(expected_error));
@@ -148,18 +185,23 @@ impl TestEnv {
     pub async fn exec_transaction_execute_commands(
         &mut self,
         command: Vec<RespValue>,
-        server_addr: &str,
+        client_address: &str,
         expected: String,
     ) {
         let command_handler = CommandHandler::new(command).unwrap();
         let result = self
-            .exec_transaction_command(command_handler, server_addr)
+            .exec_transaction_command(command_handler, client_address)
             .await;
         assert_eq!(result.is_ok(), true);
 
         let response = result
             .unwrap()
-            .handle_dispatch_result(server_addr.to_string(), &mut self.store, &mut self.state)
+            .handle_dispatch_result(
+                &self.server,
+                client_address.to_string(),
+                &mut self.store,
+                &mut self.state,
+            )
             .await;
 
         assert_eq!(response, expected);
@@ -426,7 +468,7 @@ impl TestUtils {
     }
 
     /// Generate a unique server address for testing
-    pub fn server_addr(port: u16) -> String {
+    pub fn client_address(port: u16) -> String {
         format!("127.0.0.1:{}", port)
     }
 
@@ -435,18 +477,19 @@ impl TestUtils {
         env: &TestEnv,
         key: &str,
         timeout_seconds: &str,
-        server_addr: &str,
+        client_address: &str,
     ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
-        let (store_clone, state_clone) = env.clone_env();
+        let (store_clone, state_clone, server_clone) = env.clone_env();
         let blpop_command = Self::blpop_command(key, timeout_seconds);
-        let server_addr = server_addr.to_string();
+        let client_address = client_address.to_string();
 
         tokio::spawn(async move {
             let command_handler = CommandHandler::new(blpop_command)?;
 
             command_handler
                 .handle_command(
-                    server_addr,
+                    &server_clone,
+                    client_address,
                     &mut store_clone.clone(),
                     &mut state_clone.clone(),
                 )
@@ -460,19 +503,20 @@ impl TestUtils {
         keys: &[&str],
         stream_ids: &[&str],
         timeout_milliseconds: &str,
-        server_addr: &str,
+        client_address: &str,
     ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
-        let (store_clone, state_clone) = env.clone_env();
+        let (store_clone, state_clone, server_clone) = env.clone_env();
         let xread_blocking_command =
             Self::xread_blocking_command(timeout_milliseconds, keys, stream_ids);
-        let server_addr = server_addr.to_string();
+        let client_address = client_address.to_string();
 
         tokio::spawn(async move {
             let command_handler = CommandHandler::new(xread_blocking_command)?;
 
             command_handler
                 .handle_command(
-                    server_addr,
+                    &server_clone,
+                    client_address,
                     &mut store_clone.clone(),
                     &mut state_clone.clone(),
                 )

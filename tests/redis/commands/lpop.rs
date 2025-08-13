@@ -9,11 +9,11 @@ use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
 async fn test_handle_lpop_command() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
@@ -35,7 +35,7 @@ async fn test_handle_lpop_command() {
 
     env.exec_command_ok(
         TestUtils::lpop_command("grape"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("mango"),
     )
     .await;
@@ -56,11 +56,11 @@ async fn test_handle_lpop_command() {
 
 #[tokio::test]
 async fn test_handle_lpop_command_invalid() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_err(
         TestUtils::invalid_command(&["LPOP"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         CommandError::InvalidLPopCommand,
     )
     .await;
@@ -68,11 +68,11 @@ async fn test_handle_lpop_command_invalid() {
 
 #[tokio::test]
 async fn test_handle_lpop_command_not_found() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::lpop_command("grape"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_null(),
     )
     .await;
@@ -80,18 +80,18 @@ async fn test_handle_lpop_command_not_found() {
 
 #[tokio::test]
 async fn test_handle_lpop_command_wrong_data_type() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::set_command("grape", "mango"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
     env.exec_command_ok(
         TestUtils::lpop_command("grape"),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_null(),
     )
     .await;
@@ -99,11 +99,11 @@ async fn test_handle_lpop_command_wrong_data_type() {
 
 #[tokio::test]
 async fn test_handle_lpop_command_multiple_elements() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_master_server();
 
     env.exec_command_ok(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
@@ -125,7 +125,7 @@ async fn test_handle_lpop_command_multiple_elements() {
 
     env.exec_command_ok(
         TestUtils::lpop_command_multiple_items("grape", 2),
-        &TestUtils::server_addr(41844),
+        &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&["mango", "raspberry"]),
     )
     .await;
