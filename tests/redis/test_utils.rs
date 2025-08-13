@@ -371,7 +371,7 @@ impl TestUtils {
         vec![RespValue::Array(vec)]
     }
 
-    /// Create a INCR command
+    /// Create an INCR command
     pub fn incr_command(key: &str) -> Vec<RespValue> {
         vec![RespValue::Array(vec![
             RespValue::BulkString("INCR".to_string()),
@@ -386,7 +386,7 @@ impl TestUtils {
         )])]
     }
 
-    /// Create a EXEC command
+    /// Create an EXEC command
     pub fn exec_command() -> Vec<RespValue> {
         vec![RespValue::Array(vec![RespValue::BulkString(
             "EXEC".to_string(),
@@ -398,6 +398,20 @@ impl TestUtils {
         vec![RespValue::Array(vec![RespValue::BulkString(
             "DISCARD".to_string(),
         )])]
+    }
+
+    /// Create an INFO command
+    pub fn info_command(message: Option<&str>) -> Vec<RespValue> {
+        if let Some(info_section) = message {
+            vec![RespValue::Array(vec![
+                RespValue::BulkString("INFO".to_string()),
+                RespValue::BulkString(info_section.to_string()),
+            ])]
+        } else {
+            vec![RespValue::Array(vec![RespValue::BulkString(
+                "INFO".to_string(),
+            )])]
+        }
     }
 
     /// Create an invalid command

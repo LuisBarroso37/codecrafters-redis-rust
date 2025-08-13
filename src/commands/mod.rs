@@ -5,6 +5,7 @@ mod command_handler;
 mod echo;
 mod get;
 mod incr;
+mod info;
 mod llen;
 mod lpop;
 mod lrange;

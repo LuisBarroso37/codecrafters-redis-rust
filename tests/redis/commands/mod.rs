@@ -3,6 +3,7 @@ mod command_dispatcher;
 mod echo;
 mod get;
 mod incr;
+mod info;
 mod llen;
 mod lpop;
 mod lpush;

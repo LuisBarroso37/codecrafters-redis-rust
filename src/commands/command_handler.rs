@@ -9,6 +9,7 @@ use crate::{
         echo::{EchoArguments, echo},
         get::{GetArguments, get},
         incr::{IncrArguments, incr},
+        info::info,
         llen::{LlenArguments, llen},
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
@@ -183,6 +184,7 @@ impl CommandHandler {
             "XRANGE" => xrange(store, self.arguments.clone()).await,
             "XREAD" => xread(server_address, store, state, self.arguments.clone()).await,
             "INCR" => incr(store, self.arguments.clone()).await,
+            "INFO" => info(self.arguments.clone()),
             _ => Err(CommandError::InvalidCommand),
         }
     }

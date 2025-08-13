@@ -19,7 +19,6 @@ impl RedisServer {
         let mut port: Option<u32> = None;
 
         while let Some(arg) = iter.next() {
-            println!("Creating Redis server with args: {}", arg);
             match arg.as_str() {
                 "--port" => {
                     let Some(port_str) = iter.next() else {

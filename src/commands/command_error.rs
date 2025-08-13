@@ -60,6 +60,10 @@ pub enum CommandError {
     InvalidIncrCommand,
     #[error("invalid INCR value")]
     InvalidIncrValue,
+    #[error("invalid INFO command")]
+    InvalidInfoCommand,
+    #[error("invalid INFO section")]
+    InvalidInfoSection,
 }
 
 impl CommandError {
@@ -146,6 +150,12 @@ impl CommandError {
             }
             CommandError::InvalidIncrValue => {
                 RespValue::Error("ERR value is not an integer or out of range".to_string()).encode()
+            }
+            CommandError::InvalidInfoCommand => {
+                RespValue::Error("ERR Invalid INFO command".to_string()).encode()
+            }
+            CommandError::InvalidInfoSection => {
+                RespValue::Error("ERR Invalid INFO section".to_string()).encode()
             }
         }
     }
