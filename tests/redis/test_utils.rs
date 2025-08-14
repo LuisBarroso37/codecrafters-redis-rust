@@ -31,6 +31,8 @@ impl TestEnv {
             server: Arc::new(RwLock::new(RedisServer {
                 port: 6379,
                 role: RedisRole::Master,
+                repl_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
+                repl_offset: 0,
             })),
         }
     }
@@ -43,6 +45,8 @@ impl TestEnv {
             server: Arc::new(RwLock::new(RedisServer {
                 port: replica_port,
                 role: RedisRole::Replica(("127.0.0.1".to_string(), 6379)),
+                repl_id: "c673350b6868f3661bd1231ad1b5389310d0a201".to_string(),
+                repl_offset: 0,
             })),
         }
     }

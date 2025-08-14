@@ -40,15 +40,24 @@ pub async fn info(
 ) -> Result<String, CommandError> {
     let info_arguments = InfoArguments::parse(arguments)?;
 
-    // $92\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\nmaster_repl_offset:0\r\n
     let server_guard = server.read().await;
+    let server_role = server_guard.role.as_string();
+
+    let mut replication = Vec::new();
+
+    if server_role == "master" {
+        replication.push(format!("role:{}", server_role));
+        replication.push(format!("connected_slaves:{}", 0));
+        replication.push(format!("master_replid:{}", server_guard.repl_id));
+        replication.push(format!("master_repl_offset:{}", server_guard.repl_offset));
+    } else {
+        replication.push(format!("role:{}", server_role));
+    }
+
+    // $92\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\nmaster_repl_offset:0\r\n
 
     match info_arguments.section {
-        InfoSection::DEFAULT => {
-            Ok(RespValue::BulkString(format!("role:{}", server_guard.role.as_string())).encode())
-        }
-        InfoSection::REPLICATION => {
-            Ok(RespValue::BulkString(format!("role:{}", server_guard.role.as_string())).encode())
-        }
+        InfoSection::DEFAULT => Ok(RespValue::BulkString(replication.join("\r\n")).encode()),
+        InfoSection::REPLICATION => Ok(RespValue::BulkString(replication.join("\r\n")).encode()),
     }
 }

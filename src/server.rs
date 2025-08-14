@@ -1,3 +1,4 @@
+use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
 use thiserror::Error;
 
@@ -32,6 +33,8 @@ impl RedisRole {
 pub struct RedisServer {
     pub port: u32,
     pub role: RedisRole,
+    pub repl_id: String,
+    pub repl_offset: u64,
 }
 
 impl RedisServer {
@@ -112,6 +115,8 @@ impl RedisServer {
         Ok(RedisServer {
             port: port.unwrap_or(6379),
             role: role.unwrap_or(RedisRole::Master),
+            repl_id: Alphanumeric.sample_string(&mut rand::rng(), 40),
+            repl_offset: 0,
         })
     }
 }

@@ -7,10 +7,13 @@ async fn test_handle_info_command_master_server() {
     let mut env = TestEnv::new_master_server();
 
     let test_cases = vec![
-        (TestUtils::info_command(None), "$11\r\nrole:master\r\n"),
+        (
+            TestUtils::info_command(None),
+            "$109\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\nmaster_repl_offset:0\r\n",
+        ),
         (
             TestUtils::info_command(Some("replication")),
-            "$11\r\nrole:master\r\n",
+            "$109\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\nmaster_repl_offset:0\r\n",
         ),
     ];
 
