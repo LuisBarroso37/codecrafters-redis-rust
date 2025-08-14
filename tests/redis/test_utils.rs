@@ -460,6 +460,15 @@ impl TestUtils {
         }
     }
 
+    /// Create a REPLCONF command
+    pub fn replconf_command(key: &str, value: &str) -> Vec<RespValue> {
+        vec![RespValue::Array(vec![
+            RespValue::BulkString("REPLCONF".to_string()),
+            RespValue::BulkString(key.to_string()),
+            RespValue::BulkString(value.to_string()),
+        ])]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();

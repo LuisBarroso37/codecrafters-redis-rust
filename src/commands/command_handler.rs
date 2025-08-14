@@ -14,6 +14,7 @@ use crate::{
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
         ping::{PingArguments, ping},
+        replconf::replconf,
         rpush_and_lpush::{PushArrayOperations, lpush, rpush},
         set::{SetArguments, set},
         type_command::{TypeArguments, type_command},
@@ -187,6 +188,7 @@ impl CommandHandler {
             "XREAD" => xread(client_address, store, state, self.arguments.clone()).await,
             "INCR" => incr(store, self.arguments.clone()).await,
             "INFO" => info(server, self.arguments.clone()).await,
+            "REPLCONF" => replconf(self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

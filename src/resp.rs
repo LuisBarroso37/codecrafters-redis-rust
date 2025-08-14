@@ -19,15 +19,18 @@ pub enum RespError {
 }
 
 impl RespError {
-    /// Converts the error to bytes suitable for sending as a Redis error response.
-    ///
-    /// Returns RESP-formatted error messages that can be sent directly to clients.
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_string(&self) -> String {
         match self {
-            RespError::UnknownRespType => b"-ERR unknown RESP type\r\n",
-            RespError::FailedToParseInteger => b"-ERR failed to parse integer\r\n",
-            RespError::InvalidBulkString => b"-ERR invalid bulk string\r\n",
-            RespError::InvalidArray => b"-ERR invalid array\r\n",
+            RespError::UnknownRespType => {
+                RespValue::Error("ERR unknown RESP type".to_string()).encode()
+            }
+            RespError::FailedToParseInteger => {
+                RespValue::Error("ERR failed to parse integer".to_string()).encode()
+            }
+            RespError::InvalidBulkString => {
+                RespValue::Error("ERR invalid bulk string".to_string()).encode()
+            }
+            RespError::InvalidArray => RespValue::Error("ERR invalid array".to_string()).encode(),
         }
     }
 }

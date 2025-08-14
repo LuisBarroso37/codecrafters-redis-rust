@@ -28,15 +28,18 @@ async fn test_handle_info_command_replica_server() {
     let mut env = TestEnv::new_replica_server(6380);
 
     let test_cases = vec![
-        (TestUtils::info_command(None), "$10\r\nrole:slave\r\n"),
+        (
+            TestUtils::info_command(None),
+            TestUtils::expected_bulk_string("role:slave"),
+        ),
         (
             TestUtils::info_command(Some("replication")),
-            "$10\r\nrole:slave\r\n",
+            TestUtils::expected_bulk_string("role:slave"),
         ),
     ];
 
     for (command, response) in test_cases {
-        env.exec_command_ok(command, &TestUtils::client_address(41844), response)
+        env.exec_command_ok(command, &TestUtils::client_address(41844), &response)
             .await;
     }
 }

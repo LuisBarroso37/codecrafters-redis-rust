@@ -64,6 +64,8 @@ pub enum CommandError {
     InvalidInfoCommand,
     #[error("invalid INFO section")]
     InvalidInfoSection,
+    #[error("invalid REPLCONF command")]
+    InvalidReplconfCommand,
 }
 
 impl CommandError {
@@ -156,6 +158,9 @@ impl CommandError {
             }
             CommandError::InvalidInfoSection => {
                 RespValue::Error("ERR Invalid INFO section".to_string()).encode()
+            }
+            CommandError::InvalidReplconfCommand => {
+                RespValue::Error("ERR Invalid REPLCONF command".to_string()).encode()
             }
         }
     }
