@@ -66,6 +66,12 @@ pub enum CommandError {
     InvalidInfoSection,
     #[error("invalid REPLCONF command")]
     InvalidReplconfCommand,
+    #[error("invalid PSYNC command")]
+    InvalidPsyncCommand,
+    #[error("invalid PSYNC replication ID")]
+    InvalidPsyncReplicationId,
+    #[error("invalid PSYNC offset")]
+    InvalidPsyncOffset,
 }
 
 impl CommandError {
@@ -161,6 +167,15 @@ impl CommandError {
             }
             CommandError::InvalidReplconfCommand => {
                 RespValue::Error("ERR Invalid REPLCONF command".to_string()).encode()
+            }
+            CommandError::InvalidPsyncCommand => {
+                RespValue::Error("ERR Invalid PSYNC command".to_string()).encode()
+            }
+            CommandError::InvalidPsyncReplicationId => {
+                RespValue::Error("ERR Invalid PSYNC replication ID".to_string()).encode()
+            }
+            CommandError::InvalidPsyncOffset => {
+                RespValue::Error("ERR Invalid PSYNC offset".to_string()).encode()
             }
         }
     }

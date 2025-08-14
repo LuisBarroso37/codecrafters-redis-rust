@@ -10,6 +10,7 @@ mod llen;
 mod lpop;
 mod lrange;
 mod ping;
+mod psync;
 mod replconf;
 mod rpush_and_lpush;
 mod set;

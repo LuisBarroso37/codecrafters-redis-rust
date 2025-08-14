@@ -9,6 +9,7 @@ mod lpop;
 mod lpush;
 mod lrange;
 mod ping;
+mod psync;
 mod replconf;
 mod rpush;
 mod set;

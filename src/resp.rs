@@ -44,7 +44,7 @@ impl RespError {
 /// - BulkString: Binary-safe strings of any length
 /// - Array: Ordered collections of RESP values
 /// - Null: Represents absence of a value
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum RespValue {
     /// Simple string values (prefixed with '+')
     SimpleString(String),

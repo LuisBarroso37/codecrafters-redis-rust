@@ -9,7 +9,7 @@ enum InfoSection {
     REPLICATION,
 }
 
-struct InfoArguments {
+pub struct InfoArguments {
     section: InfoSection,
 }
 

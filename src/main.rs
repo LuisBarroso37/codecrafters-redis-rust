@@ -55,8 +55,12 @@ async fn main() {
     let server: Arc<RwLock<RedisServer>> = Arc::new(RwLock::new(server));
 
     match server_role {
+        // Connect to master server in separate thread
         RedisRole::Replica((address, port)) => {
-            let mut stream = match TcpStream::connect(format!("{}:{}", address, port)).await {
+            let server = server.clone();
+
+            tokio::spawn(async move { 
+                let mut stream = match TcpStream::connect(format!("{}:{}", address, port)).await {
                 Ok(stream) => stream,
                 Err(e) => {
                     eprintln!("Failed to connect to replica: {}", e);
@@ -73,8 +77,9 @@ async fn main() {
                     return;
                 }
             }
+             });
         }
-        _ => {}
+        _ => ()
     }
 
     // Accept connections and spawn tasks to handle each client

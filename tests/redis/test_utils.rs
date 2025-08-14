@@ -469,6 +469,15 @@ impl TestUtils {
         ])]
     }
 
+    /// Create a PSYNC command
+    pub fn psync_command(replication_id: &str, offset: &str) -> Vec<RespValue> {
+        vec![RespValue::Array(vec![
+            RespValue::BulkString("PSYNC".to_string()),
+            RespValue::BulkString(replication_id.to_string()),
+            RespValue::BulkString(offset.to_string()),
+        ])]
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
         let mut vec = Vec::new();

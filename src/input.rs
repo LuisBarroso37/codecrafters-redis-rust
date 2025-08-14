@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use regex::Regex;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -114,46 +115,95 @@ pub async fn handshake(
     stream: &mut TcpStream,
     server: &Arc<RwLock<RedisServer>>,
 ) -> Result<(), CommandReadError> {
-    send_and_handle_handshake_command(
+    let response = send_and_handle_handshake_command(
         stream,
         RespValue::Array(vec![RespValue::BulkString("PING".to_string())]),
-        RespValue::SimpleString("PONG".to_string()),
     )
     .await?;
 
+    if response != RespValue::SimpleString("PONG".to_string()) {
+        return Err(CommandReadError::InvalidResponseFromMaster);
+    }
+
     {
         let server_guard = server.read().await;
-        send_and_handle_handshake_command(
+        let response = send_and_handle_handshake_command(
             stream,
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".to_string()),
                 RespValue::BulkString("listening-port".to_string()),
                 RespValue::BulkString(server_guard.port.to_string()),
             ]),
-            RespValue::SimpleString("OK".to_string()),
         )
         .await?;
+
+        if response != RespValue::SimpleString("OK".to_string()) {
+            return Err(CommandReadError::InvalidResponseFromMaster);
+        }
     }
 
-    send_and_handle_handshake_command(
+    let response = send_and_handle_handshake_command(
         stream,
         RespValue::Array(vec![
             RespValue::BulkString("REPLCONF".to_string()),
             RespValue::BulkString("capa".to_string()),
             RespValue::BulkString("psync2".to_string()),
         ]),
-        RespValue::SimpleString("OK".to_string()),
     )
     .await?;
 
+    if response != RespValue::SimpleString("OK".to_string()) {
+        return Err(CommandReadError::InvalidResponseFromMaster);
+    }
+
+    let response = send_and_handle_handshake_command(
+        stream,
+        RespValue::Array(vec![
+            RespValue::BulkString("PSYNC".to_string()),
+            RespValue::BulkString("?".to_string()),
+            RespValue::BulkString("-1".to_string()),
+        ]),
+    )
+    .await?;
+
+    match response {
+        RespValue::Array(split_response) => {
+            if split_response[0] == RespValue::BulkString("FULLRESYNC".to_string()) {
+                let parts: Vec<&str> = split_response[1..]
+                    .iter()
+                    .filter_map(|v| {
+                        if let RespValue::BulkString(s) = v {
+                            Some(s.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if parts.len() != 3 || !is_valid_repl_id(parts[1]) || parts[2] == "0" {
+                    return Err(CommandReadError::InvalidResponseFromMaster);
+                }
+            } else {
+                return Err(CommandReadError::InvalidResponseFromMaster);
+            }
+        }
+        _ => {
+            return Err(CommandReadError::InvalidResponseFromMaster);
+        }
+    };
+
     Ok(())
+}
+
+fn is_valid_repl_id(repl_id: &str) -> bool {
+    let re = Regex::new(r"^[a-zA-Z0-9]{40}$").unwrap();
+    re.is_match(repl_id)
 }
 
 async fn send_and_handle_handshake_command(
     stream: &mut TcpStream,
     command: RespValue,
-    expected_response: RespValue,
-) -> Result<(), CommandReadError> {
+) -> Result<RespValue, CommandReadError> {
     stream
         .write_all(command.encode().as_bytes())
         .await
@@ -169,11 +219,7 @@ async fn send_and_handle_handshake_command(
         return Err(CommandReadError::InvalidResponseFromMaster);
     }
 
-    if resp_value[0] != expected_response {
-        return Err(CommandReadError::InvalidResponseFromMaster);
-    }
-
-    Ok(())
+    Ok(resp_value[0].clone())
 }
 
 #[cfg(test)]

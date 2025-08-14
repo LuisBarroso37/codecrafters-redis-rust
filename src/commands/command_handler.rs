@@ -9,12 +9,13 @@ use crate::{
         echo::{EchoArguments, echo},
         get::{GetArguments, get},
         incr::{IncrArguments, incr},
-        info::info,
+        info::{InfoArguments, info},
         llen::{LlenArguments, llen},
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
         ping::{PingArguments, ping},
-        replconf::replconf,
+        psync::{PsyncArguments, psync},
+        replconf::{ReplconfArguments, replconf},
         rpush_and_lpush::{PushArrayOperations, lpush, rpush},
         set::{SetArguments, set},
         type_command::{TypeArguments, type_command},
@@ -136,6 +137,9 @@ impl CommandHandler {
             "XRANGE" => XrangeArguments::parse(self.arguments.clone()).err(),
             "XREAD" => XreadArguments::parse(self.arguments.clone()).err(),
             "INCR" => IncrArguments::parse(self.arguments.clone()).err(),
+            "INFO" => InfoArguments::parse(self.arguments.clone()).err(),
+            "REPLCONF" => ReplconfArguments::parse(self.arguments.clone()).err(),
+            "PSYNC" => PsyncArguments::parse(self.arguments.clone()).err(),
             _ => Some(CommandError::InvalidCommand),
         }
     }
@@ -189,6 +193,7 @@ impl CommandHandler {
             "INCR" => incr(store, self.arguments.clone()).await,
             "INFO" => info(server, self.arguments.clone()).await,
             "REPLCONF" => replconf(self.arguments.clone()).await,
+            "PSYNC" => psync(server, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }
