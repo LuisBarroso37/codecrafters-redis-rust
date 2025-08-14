@@ -2,17 +2,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::{Mutex, RwLock},
 };
 
 use crate::{
-    commands::{CommandDispatcher, CommandHandler},
-    input::parse_input,
-    key_value_store::KeyValueStore,
-    resp::RespValue,
-    server::RedisServer,
-    state::State,
+    commands::{CommandDispatcher, CommandHandler}, handshake::handshake, input::parse_input, key_value_store::KeyValueStore, resp::RespValue, server::{RedisRole, RedisServer}, state::State
 };
 
 mod commands;
@@ -21,6 +16,7 @@ mod key_value_store;
 mod resp;
 mod server;
 mod state;
+mod handshake;
 
 /// Main entry point for the Redis server implementation.
 ///
@@ -33,14 +29,50 @@ mod state;
 /// - Server state for managing blocking operations and client subscriptions
 #[tokio::main]
 async fn main() {
-    let server = RedisServer::new(std::env::args()).unwrap();
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", server.port))
-        .await
-        .unwrap();
+    let server = match RedisServer::new(std::env::args()) {
+        Ok(server) => server,
+        Err(e) => {
+            eprintln!("Failed to create Redis server: {}", e);
+            return;
+        }
+    };
+
+    let listener = match TcpListener::bind(format!("127.0.0.1:{}", server.port)).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            eprintln!("Failed to bind TCP listener: {}", e);
+            return;
+        }
+    };
+
+    let server_role = server.role.clone();
 
     let store: Arc<Mutex<KeyValueStore>> = Arc::new(Mutex::new(HashMap::new()));
     let state: Arc<Mutex<State>> = Arc::new(Mutex::new(State::new()));
     let server: Arc<RwLock<RedisServer>> = Arc::new(RwLock::new(server));
+
+    match server_role {
+        RedisRole::Replica((address, port)) => {
+            let mut stream = match TcpStream::connect(format!("{}:{}", address, port)).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    eprintln!("Failed to connect to replica: {}", e);
+                    return;
+                }
+            };
+
+            match handshake(&mut stream).await {
+                Ok(()) => {
+                    tokio::spawn(async move { loop {} });
+                }
+                Err(e) => {
+                    eprintln!("Failed to perform handshake: {}", e);
+                    return;
+                }
+            }
+        }
+        _ => {}
+    }
 
     // Accept connections and spawn tasks to handle each client
     loop {
@@ -115,7 +147,7 @@ async fn main() {
                 });
             }
             Err(e) => {
-                println!("error: {}", e);
+                eprintln!("error: {}", e);
             }
         }
     }
