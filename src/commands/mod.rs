@@ -20,7 +20,7 @@ mod xadd;
 mod xrange;
 mod xread;
 
-pub use command_dispatcher::{CommandDispatcher, DispatchError, DispatchResult};
+pub use command_dispatcher::{CommandDispatcher, DispatchError, DispatchResult, handle_extra_action};
 pub use command_error::CommandError;
 pub use command_handler::CommandHandler;
 pub use stream_utils::validate_stream_id;

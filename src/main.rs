@@ -7,7 +7,7 @@ use tokio::{
 };
 
 use crate::{
-    commands::CommandDispatcher,
+    commands::{handle_extra_action, CommandDispatcher},
     input::{handshake, read_and_parse_command},
     key_value_store::KeyValueStore,
     server::{RedisRole, RedisServer},
@@ -114,10 +114,15 @@ async fn main() {
                                 }
                             };
 
-                        let response = dispatch_result
+                        let (response, extra_action) = dispatch_result
                             .handle_dispatch_result(&server, client_address, &mut store, &mut state)
                             .await;
                         let _ = stream.write_all(response.as_bytes()).await;
+
+                        if let Some(extra_action) = extra_action {
+                            let action_response = handle_extra_action(extra_action).await;
+                            let _ = stream.write_all(action_response.as_slice()).await;
+                        }
                     }
                 });
             }

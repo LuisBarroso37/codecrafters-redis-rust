@@ -51,6 +51,24 @@ impl DispatchError {
     }
 }
 
+pub enum ExtraAction {
+    SendRdb
+}
+
+pub async fn handle_extra_action(action: ExtraAction) -> Vec<u8> {
+    match action {
+        ExtraAction::SendRdb => {
+            let contents = tokio::fs::read("empty.rdb").await.unwrap();
+
+
+            let mut response = format!("${}\r\n", contents.len()).into_bytes();
+            response.extend_from_slice(&contents);
+
+            return response;
+        },
+    }
+}
+
 /// Represents the result of dispatching a command.
 ///
 /// This enum distinguishes between immediate responses (such as "OK" or "QUEUED"),
@@ -85,16 +103,22 @@ impl DispatchResult {
         client_address: String,
         store: &mut Arc<Mutex<KeyValueStore>>,
         state: &mut Arc<Mutex<State>>,
-    ) -> String {
+    ) -> (String, Option<ExtraAction>) {
         match self {
-            DispatchResult::ImmediateResponse(value) => value.clone(),
+            DispatchResult::ImmediateResponse(value) => (value.clone(), None),
             DispatchResult::ExecuteSingleCommand(command) => {
+                let mut extra_action = None;
+
+                if command.name == "PSYNC" {
+                    extra_action = Some(ExtraAction::SendRdb);
+                }
+                
                 match command
                     .handle_command(server, client_address.clone(), store, state)
                     .await
                 {
-                    Ok(resp) => resp,
-                    Err(e) => e.as_string(),
+                    Ok(resp) => (resp, extra_action),
+                    Err(e) => (e.as_string(), None),
                 }
             }
             DispatchResult::ExecuteTransactionCommands(commands) => {
@@ -115,7 +139,7 @@ impl DispatchResult {
                     }
                 }
 
-                responses.join("")
+                (responses.join(""), None)
             }
         }
     }
