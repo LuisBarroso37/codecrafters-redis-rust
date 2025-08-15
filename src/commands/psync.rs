@@ -48,7 +48,7 @@ pub async fn psync(
 
     Ok(RespValue::SimpleString(format!(
         "FULLRESYNC {} {}",
-        master_repl_id, psync_arguments.offset
+        master_repl_id, server_guard.repl_offset
     ))
     .encode())
 }
