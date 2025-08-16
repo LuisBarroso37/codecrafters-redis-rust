@@ -75,7 +75,15 @@ pub async fn handle_client_connection(
 
         {
             let mut stream_guard = stream.lock().await;
-            let _ = stream_guard.write_all(response.as_bytes()).await;
+            
+            // For PSYNC, enable TCP_NODELAY to force immediate FULLRESYNC sending
+            if response.to_lowercase().contains("fullresync") {
+                let _ = stream_guard.set_nodelay(true);
+                let _ = stream_guard.write_all(response.as_bytes()).await;
+                let _ = stream_guard.set_nodelay(false);
+            } else {
+                let _ = stream_guard.write_all(response.as_bytes()).await;
+            }
         }
 
         if let Some(extra_action) = extra_action {

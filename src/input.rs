@@ -154,7 +154,7 @@ pub async fn handshake(
 
     let response = send_and_handle_handshake_command(
         &mut buffer,
-        stream,
+        Arc::clone(&stream),
         RespValue::Array(vec![
             RespValue::BulkString("PSYNC".to_string()),
             RespValue::BulkString("?".to_string()),
@@ -164,35 +164,82 @@ pub async fn handshake(
     .await?;
 
     match response {
-        RespValue::Array(split_response) => {
-            if split_response[0] != RespValue::BulkString("FULLRESYNC".to_string()) {
+        RespValue::SimpleString(fullresync_line) => {
+            let parts: Vec<&str> = fullresync_line.split_whitespace().collect();
+            
+            if parts.len() != 3 || parts[0] != "FULLRESYNC" {
                 return Err(CommandReadError::InvalidResponseFromMaster);
             }
-
-            let parts: Vec<&str> = split_response[1..]
-                .iter()
-                .filter_map(|v| {
-                    if let RespValue::BulkString(s) = v {
-                        Some(s.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            println!(
-                "Received FULLRESYNC response, {:?} {:?}",
-                split_response, parts
-            );
-
-            if parts.len() != 3 || !is_valid_repl_id(parts[1]) || parts[2] == "0" {
+            
+            let repl_id = parts[1];
+            let offset = parts[2];
+            
+            if !is_valid_repl_id(repl_id) || offset != "0" {
                 return Err(CommandReadError::InvalidResponseFromMaster);
             }
         }
         _ => {
             return Err(CommandReadError::InvalidResponseFromMaster);
         }
-    };
+    }
 
+    // Now separately receive the RDB file (arrives after delay)
+    receive_rdb_file(stream).await?;
+
+    Ok(())
+}
+
+async fn receive_rdb_file(stream: Arc<Mutex<TcpStream>>) -> Result<(), CommandReadError> {
+    let mut stream_guard = stream.lock().await;
+    
+    // Read the RDB bulk string header ($<size>\r\n)
+    let mut size_line = Vec::new();
+    let mut byte = [0u8; 1];
+    
+    loop {
+        stream_guard.read_exact(&mut byte).await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+        
+        size_line.push(byte[0]);
+        
+        if size_line.len() >= 2 && 
+           size_line[size_line.len()-2] == b'\r' && 
+           size_line[size_line.len()-1] == b'\n' {
+            break;
+        }
+    }
+    
+    // Parse RDB size
+    let size_str = std::str::from_utf8(&size_line[1..size_line.len()-2]) // Skip $ and \r\n
+        .map_err(CommandReadError::InvalidUtf8)?;
+    let rdb_size: usize = size_str.parse()
+        .map_err(|_| CommandReadError::InvalidResponseFromMaster)?;
+    
+    println!("Receiving RDB file of {} bytes (streaming)", rdb_size);
+    
+    // Stream the RDB data in chunks instead of loading all at once
+    let mut total_received = 0usize;
+    let mut buffer = [0u8; 4096]; // 4KB chunks
+    
+    while total_received < rdb_size {
+        let remaining = rdb_size - total_received;
+        let chunk_size = std::cmp::min(buffer.len(), remaining);
+        
+        stream_guard.read_exact(&mut buffer[..chunk_size]).await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+        
+        total_received += chunk_size;
+        
+        // Optional: Process RDB chunk here if needed
+        // For now, we just consume it
+        
+        if total_received % 16384 == 0 || total_received == rdb_size {
+            println!("Received {}/{} bytes of RDB file", total_received, rdb_size);
+        }
+    }
+    
+    println!("Successfully received and processed RDB file ({} bytes)", rdb_size);
+    
     Ok(())
 }
 

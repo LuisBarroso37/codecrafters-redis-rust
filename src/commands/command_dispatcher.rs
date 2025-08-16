@@ -3,6 +3,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::{
+    fs::File,
+    io::{AsyncReadExt, BufReader},
     net::TcpStream,
     sync::{Mutex, RwLock},
 };
@@ -56,7 +58,7 @@ impl DispatchError {
 }
 
 pub enum ExtraAction {
-    SendRdb,
+    SendRdbFile,
     SendWriteCommand,
 }
 
@@ -68,19 +70,44 @@ pub async fn handle_extra_action(
     action: ExtraAction,
 ) -> Option<Vec<u8>> {
     match action {
-        ExtraAction::SendRdb => {
-            let contents = tokio::fs::read("empty.rdb").await.unwrap();
-
-            let mut response = format!("${}\r\n", contents.len()).into_bytes();
-            response.extend_from_slice(&contents);
-
+        ExtraAction::SendRdbFile => {
+            // Stream RDB file instead of loading it all into memory
+            let file = File::open("empty.rdb").await.unwrap();
+            let file_size = file.metadata().await.unwrap().len();
+            
+            // First send the bulk string header
+            let header = format!("${}\r\n", file_size);
+            
+            let mut stream_guard = stream.lock().await;
+            stream_guard.write_all(header.as_bytes()).await.unwrap();
+            
+            // Stream the file contents in chunks
+            let mut reader = BufReader::new(file);
+            let mut buffer = [0u8; 4096]; // 4KB chunks
+            
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        stream_guard.write_all(&buffer[..n]).await.unwrap();
+                    }
+                    Err(e) => {
+                        eprintln!("Error streaming RDB file: {}", e);
+                        break;
+                    }
+                }
+            }
+            
+            stream_guard.flush().await.unwrap();
+            drop(stream_guard); // Release the lock
+            
+            // Add replica to replication list after successful RDB streaming
             let mut server_guard = server.write().await;
-
             if let Some(replicas) = &mut server_guard.replicas {
                 replicas.insert(client_address.to_string(), stream);
             }
 
-            Some(response)
+            None // Return None since we handled the streaming directly
         }
         ExtraAction::SendWriteCommand => {
             let mut server_guard = server.write().await;
@@ -141,7 +168,7 @@ impl DispatchResult {
                 let mut extra_action = None;
 
                 if command.name == "PSYNC" {
-                    extra_action = Some(ExtraAction::SendRdb);
+                    extra_action = Some(ExtraAction::SendRdbFile);
                 } else if Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"])
                     .contains(&command.name.as_str())
                 {
