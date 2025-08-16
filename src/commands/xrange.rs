@@ -106,7 +106,7 @@ impl XrangeArguments {
 /// // Returns: "*1\r\n*2\r\n$15\r\n1518951480106-0\r\n*4\r\n$4\r\ntemp\r\n$2\r\n25\r\n..."
 /// ```
 pub async fn xrange(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let xrange_arguments = XrangeArguments::parse(arguments)?;

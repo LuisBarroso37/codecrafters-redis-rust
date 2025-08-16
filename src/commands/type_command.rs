@@ -78,7 +78,7 @@ impl TypeArguments {
 /// // Returns: "+string\r\n" or "+none\r\n"
 /// ```
 pub async fn type_command(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let type_arguments = TypeArguments::parse(arguments)?;

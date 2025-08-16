@@ -1,7 +1,13 @@
 use std::sync::Arc;
 
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock};
+use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, BufReader},
+    sync::{Mutex, RwLock},
+};
 
 use crate::{
     commands::{CommandError, CommandHandler},
@@ -52,20 +58,72 @@ impl DispatchError {
 }
 
 pub enum ExtraAction {
-    SendRdb
+    SendRdbFile,
+    SendWriteCommand,
 }
 
-pub async fn handle_extra_action(action: ExtraAction) -> Vec<u8> {
+pub async fn handle_extra_action(
+    parsed_input: Vec<RespValue>,
+    client_address: &str,
+    writer: Arc<RwLock<OwnedWriteHalf>>,
+    server: Arc<RwLock<RedisServer>>,
+    action: ExtraAction,
+) -> tokio::io::Result<()> {
     match action {
-        ExtraAction::SendRdb => {
-            let contents = tokio::fs::read("empty.rdb").await.unwrap();
+        ExtraAction::SendRdbFile => {
+            // Stream RDB file instead of loading it all into memory
+            let file = File::open("empty.rdb").await?;
+            let file_size = file.metadata().await?.len();
 
+            // First send the bulk string header
+            let header = format!("${}\r\n", file_size);
 
-            let mut response = format!("${}\r\n", contents.len()).into_bytes();
-            response.extend_from_slice(&contents);
+            let mut writer_guard = writer.write().await;
+            writer_guard.write_all(header.as_bytes()).await?;
 
-            return response;
-        },
+            // Stream the file contents in chunks
+            let mut reader = BufReader::new(file);
+            let mut buffer = [0u8; 4096]; // 4KB chunks
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        writer_guard.write_all(&buffer[..n]).await?;
+                    }
+                    Err(e) => {
+                        eprintln!("Error streaming RDB file: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            writer_guard.flush().await?;
+            drop(writer_guard); // Release the lock
+
+            // Add replica to replication list after successful RDB streaming
+            let mut server_guard = server.write().await;
+            if let Some(replicas) = &mut server_guard.replicas {
+                replicas.insert(client_address.to_string(), writer);
+            }
+
+            Ok(())
+        }
+        ExtraAction::SendWriteCommand => {
+            let server_guard = server.read().await;
+
+            if let Some(ref replicas) = server_guard.replicas {
+                for replica in replicas.values() {
+                    let mut replica_guard = replica.write().await;
+                    replica_guard
+                        .write_all(parsed_input[0].encode().as_bytes())
+                        .await?;
+                    replica_guard.flush().await?;
+                }
+            }
+
+            Ok(())
+        }
     }
 }
 
@@ -99,10 +157,10 @@ impl DispatchResult {
     /// * `String` - A RESP-encoded response to be sent to the client
     pub async fn handle_dispatch_result(
         &self,
-        server: &Arc<RwLock<RedisServer>>,
-        client_address: String,
-        store: &mut Arc<Mutex<KeyValueStore>>,
-        state: &mut Arc<Mutex<State>>,
+        server: Arc<RwLock<RedisServer>>,
+        client_address: &str,
+        store: Arc<Mutex<KeyValueStore>>,
+        state: Arc<Mutex<State>>,
     ) -> (String, Option<ExtraAction>) {
         match self {
             DispatchResult::ImmediateResponse(value) => (value.clone(), None),
@@ -110,11 +168,20 @@ impl DispatchResult {
                 let mut extra_action = None;
 
                 if command.name == "PSYNC" {
-                    extra_action = Some(ExtraAction::SendRdb);
+                    extra_action = Some(ExtraAction::SendRdbFile);
+                } else if Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"])
+                    .contains(&command.name.as_str())
+                {
+                    extra_action = Some(ExtraAction::SendWriteCommand);
                 }
-                
+
                 match command
-                    .handle_command(server, client_address.clone(), store, state)
+                    .handle_command(
+                        Arc::clone(&server),
+                        client_address,
+                        Arc::clone(&store),
+                        Arc::clone(&state),
+                    )
                     .await
                 {
                     Ok(resp) => (resp, extra_action),
@@ -127,7 +194,12 @@ impl DispatchResult {
 
                 for cmd in commands {
                     match cmd
-                        .handle_command(server, client_address.clone(), store, state)
+                        .handle_command(
+                            Arc::clone(&server),
+                            client_address,
+                            Arc::clone(&store),
+                            Arc::clone(&state),
+                        )
                         .await
                     {
                         Ok(resp) => {
@@ -159,9 +231,9 @@ pub struct CommandDispatcher {
 
 impl CommandDispatcher {
     /// Creates a new `CommandDispatcher` with the given server address and state.
-    pub fn new(client_address: String, state: Arc<Mutex<State>>) -> Self {
+    pub fn new(client_address: &str, state: Arc<Mutex<State>>) -> Self {
         CommandDispatcher {
-            client_address,
+            client_address: client_address.to_string(),
             state,
         }
     }

@@ -111,7 +111,7 @@ impl IncrArguments {
 /// - Error on non-integer string values
 /// - Returns the new value after increment
 pub async fn incr(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let incr_arguments = IncrArguments::parse(arguments)?;

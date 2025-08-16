@@ -99,19 +99,22 @@ impl XaddArguments {
 /// // Returns: "$19\r\n1518951480106-0\r\n" (generated stream ID)
 /// ```
 pub async fn xadd(
-    store: &mut Arc<Mutex<KeyValueStore>>,
-    state: &mut Arc<Mutex<State>>,
+    store: Arc<Mutex<KeyValueStore>>,
+    state: Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let xadd_arguments = XaddArguments::parse(arguments)?;
 
-    let validated_stream_id =
-        validate_stream_id_against_store(store, &xadd_arguments.key, &xadd_arguments.stream_id)
-            .await
-            .map_err(|e| match e.as_str() {
-                "Invalid data type for key" => CommandError::InvalidDataTypeForKey,
-                _ => CommandError::InvalidStreamId(e),
-            })?;
+    let validated_stream_id = validate_stream_id_against_store(
+        Arc::clone(&store),
+        &xadd_arguments.key,
+        &xadd_arguments.stream_id,
+    )
+    .await
+    .map_err(|e| match e.as_str() {
+        "Invalid data type for key" => CommandError::InvalidDataTypeForKey,
+        _ => CommandError::InvalidStreamId(e),
+    })?;
 
     let mut store_guard = store.lock().await;
 
@@ -160,14 +163,14 @@ pub async fn xadd(
 /// * `Ok(String)` - A validated stream ID in format "timestamp-sequence"
 /// * `Err(String)` - Error message if the stream ID is invalid or out of order
 async fn validate_stream_id_against_store(
-    store: &Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key: &str,
     stream_id: &str,
 ) -> Result<String, String> {
     if stream_id == "*" {
         let timestamp = get_timestamp_in_milliseconds()
             .map_err(|_| "System time is before unix epoch".to_string())?;
-        let sequence = get_next_sequence_for_timestamp(&store, key, timestamp).await?;
+        let sequence = get_next_sequence_for_timestamp(store, key, timestamp).await?;
 
         return Ok(format!("{}-{}", timestamp, sequence));
     }
@@ -175,7 +178,7 @@ async fn validate_stream_id_against_store(
     let (timestamp, sequence_part) = parse_stream_id_parts(stream_id)?;
 
     if sequence_part == "*" {
-        let sequence = get_next_sequence_for_timestamp(&store, key, timestamp).await?;
+        let sequence = get_next_sequence_for_timestamp(store, key, timestamp).await?;
 
         return Ok(format!("{}-{}", timestamp, sequence));
     }
@@ -260,7 +263,7 @@ fn parse_stream_id_parts(stream_id: &str) -> Result<(u128, &str), String> {
 /// validate_against_existing_entries(&store, "mystream", 1234, 4).await; // Error: too small
 /// ```
 async fn validate_against_existing_entries(
-    store: &Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key: &str,
     timestamp: u128,
     sequence: u128,
@@ -293,7 +296,7 @@ async fn validate_against_existing_entries(
 /// * `Ok(u128)` - The next available sequence number for this timestamp
 /// * `Err(String)` - Error message if the stream contains invalid data
 async fn get_next_sequence_for_timestamp(
-    store: &Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key: &str,
     timestamp: u128,
 ) -> Result<u128, String> {
@@ -496,7 +499,7 @@ mod tests {
 
         for (store_data, key, timestamp, expected_sequence) in test_cases {
             let store = Arc::new(Mutex::new(store_data));
-            let result = get_next_sequence_for_timestamp(&store, key, timestamp).await;
+            let result = get_next_sequence_for_timestamp(store, key, timestamp).await;
             assert_eq!(
                 result, expected_sequence,
                 "Failed for key: {}, timestamp: {}",
@@ -584,7 +587,7 @@ mod tests {
 
         for (store_data, key, timestamp, sequence, expected) in test_cases {
             let store = Arc::new(Mutex::new(store_data));
-            let result = validate_against_existing_entries(&store, key, timestamp, sequence).await;
+            let result = validate_against_existing_entries(store, key, timestamp, sequence).await;
             assert_eq!(
                 result, expected,
                 "Failed for key: {}, timestamp: {}, sequence: {}",
@@ -720,7 +723,7 @@ mod tests {
         ];
 
         for (key, stream_id, expected) in test_cases {
-            let result = validate_stream_id_against_store(&store, key, stream_id).await;
+            let result = validate_stream_id_against_store(Arc::clone(&store), key, stream_id).await;
             assert_eq!(
                 result, expected,
                 "Failed for key: {}, stream_id: {}",
@@ -729,7 +732,7 @@ mod tests {
         }
 
         // Test auto-generation with "*"
-        let result = validate_stream_id_against_store(&store, "sensor", "*").await;
+        let result = validate_stream_id_against_store(store, "sensor", "*").await;
         assert_eq!(result.is_ok(), true);
 
         // Should be greater than existing entry

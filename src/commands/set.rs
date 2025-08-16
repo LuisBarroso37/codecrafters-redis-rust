@@ -140,7 +140,7 @@ impl SetArguments {
 /// // Returns: "+OK\r\n"
 /// ```
 pub async fn set(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let set_arguments = SetArguments::parse(arguments)?;

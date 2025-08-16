@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 
-use crate::commands::{CommandError, CommandHandler};
+use crate::commands::CommandError;
 use crate::resp::{RespError, RespValue};
 use crate::server::RedisServer;
 
@@ -20,8 +20,6 @@ pub enum CommandReadError {
     InvalidUtf8(#[from] std::str::Utf8Error),
     #[error("RESP parse error")]
     RespParseError(#[from] RespError),
-    #[error("Failed to get client address")]
-    ClientAddressError,
     #[error("Command construction error")]
     CommandError(#[from] CommandError),
     #[error("Invalid response from master")]
@@ -37,9 +35,6 @@ impl CommandReadError {
             }
             CommandReadError::InvalidUtf8(err) => RespValue::Error(format!("Err {}", err)).encode(),
             CommandReadError::RespParseError(err) => err.as_string(),
-            CommandReadError::ClientAddressError => {
-                RespValue::Error("Err failed to get client address".to_string()).encode()
-            }
             CommandReadError::CommandError(err) => err.as_string(),
             CommandReadError::InvalidResponseFromMaster => {
                 RespValue::Error("Err invalid response from master".to_string()).encode()
@@ -79,9 +74,14 @@ pub fn parse_input(input: &[u8]) -> Result<Vec<&str>, CommandReadError> {
         .collect::<Vec<&str>>())
 }
 
-async fn read_and_parse_resp(stream: &mut TcpStream) -> Result<Vec<RespValue>, CommandReadError> {
-    let mut buf = [0; 1024];
-    let number_of_bytes = match stream.read(&mut buf).await {
+pub async fn read_and_parse_resp<R>(
+    stream: &mut R,
+    buffer: &mut [u8; 1024],
+) -> Result<Vec<RespValue>, CommandReadError>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let number_of_bytes = match stream.read(buffer).await {
         Ok(n) => n,
         Err(e) => return Err(CommandReadError::IoError(e.to_string())),
     };
@@ -90,32 +90,20 @@ async fn read_and_parse_resp(stream: &mut TcpStream) -> Result<Vec<RespValue>, C
         return Err(CommandReadError::ConnectionClosed);
     }
 
-    let input = parse_input(&buf)?;
+    let input = parse_input(&buffer[..number_of_bytes])?;
     let parsed_input = RespValue::parse(input)?;
 
     Ok(parsed_input)
 }
 
-pub async fn read_and_parse_command(
-    stream: &mut TcpStream,
-) -> Result<(CommandHandler, String), CommandReadError> {
-    let parsed_input = read_and_parse_resp(stream).await?;
-
-    let client_address = match stream.peer_addr() {
-        Ok(address) => address.to_string(),
-        Err(_) => return Err(CommandReadError::ClientAddressError),
-    };
-
-    let command_handler = CommandHandler::new(parsed_input)?;
-
-    Ok((command_handler, client_address))
-}
-
 pub async fn handshake(
     stream: &mut TcpStream,
-    server: &Arc<RwLock<RedisServer>>,
+    server: Arc<RwLock<RedisServer>>,
 ) -> Result<(), CommandReadError> {
+    let mut buffer: [u8; 1024] = [0; 1024];
+
     let response = send_and_handle_handshake_command(
+        &mut buffer,
         stream,
         RespValue::Array(vec![RespValue::BulkString("PING".to_string())]),
     )
@@ -128,6 +116,7 @@ pub async fn handshake(
     {
         let server_guard = server.read().await;
         let response = send_and_handle_handshake_command(
+            &mut buffer,
             stream,
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".to_string()),
@@ -143,6 +132,7 @@ pub async fn handshake(
     }
 
     let response = send_and_handle_handshake_command(
+        &mut buffer,
         stream,
         RespValue::Array(vec![
             RespValue::BulkString("REPLCONF".to_string()),
@@ -156,7 +146,7 @@ pub async fn handshake(
         return Err(CommandReadError::InvalidResponseFromMaster);
     }
 
-    let response = send_and_handle_handshake_command(
+    let response = send_and_handle_psync_command(
         stream,
         RespValue::Array(vec![
             RespValue::BulkString("PSYNC".to_string()),
@@ -167,40 +157,33 @@ pub async fn handshake(
     .await?;
 
     match response {
-        RespValue::Array(split_response) => {
-            if split_response[0] == RespValue::BulkString("FULLRESYNC".to_string()) {
-                let parts: Vec<&str> = split_response[1..]
-                    .iter()
-                    .filter_map(|v| {
-                        if let RespValue::BulkString(s) = v {
-                            Some(s.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+        RespValue::SimpleString(fullresync_line) => {
+            let parts: Vec<&str> = fullresync_line.split_whitespace().collect();
 
-                if parts.len() != 3 || !is_valid_repl_id(parts[1]) || parts[2] == "0" {
-                    return Err(CommandReadError::InvalidResponseFromMaster);
-                }
-            } else {
+            if parts.len() != 3 || parts[0] != "FULLRESYNC" {
+                return Err(CommandReadError::InvalidResponseFromMaster);
+            }
+
+            let repl_id = parts[1];
+            let offset = parts[2];
+
+            if !is_valid_repl_id(repl_id) || offset != "0" {
                 return Err(CommandReadError::InvalidResponseFromMaster);
             }
         }
         _ => {
             return Err(CommandReadError::InvalidResponseFromMaster);
         }
-    };
+    }
+
+    // Now separately receive the RDB file
+    receive_rdb_file(stream).await?;
 
     Ok(())
 }
 
-fn is_valid_repl_id(repl_id: &str) -> bool {
-    let re = Regex::new(r"^[a-zA-Z0-9]{40}$").unwrap();
-    re.is_match(repl_id)
-}
-
 async fn send_and_handle_handshake_command(
+    buffer: &mut [u8; 1024],
     stream: &mut TcpStream,
     command: RespValue,
 ) -> Result<RespValue, CommandReadError> {
@@ -213,13 +196,115 @@ async fn send_and_handle_handshake_command(
         .await
         .map_err(|e| CommandReadError::IoError(e.to_string()))?;
 
-    let resp_value = read_and_parse_resp(stream).await?;
+    let resp_value = read_and_parse_resp(stream, buffer).await?;
 
     if resp_value.len() != 1 {
         return Err(CommandReadError::InvalidResponseFromMaster);
     }
 
     Ok(resp_value[0].clone())
+}
+
+fn is_valid_repl_id(repl_id: &str) -> bool {
+    let re = Regex::new(r"^[a-zA-Z0-9]{40}$").unwrap();
+    re.is_match(repl_id)
+}
+
+async fn send_and_handle_psync_command(
+    stream: &mut TcpStream,
+    command: RespValue,
+) -> Result<RespValue, CommandReadError> {
+    stream
+        .write_all(command.encode().as_bytes())
+        .await
+        .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+    stream
+        .flush()
+        .await
+        .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+
+    // Read only the FULLRESYNC line, byte by byte to avoid reading RDB data
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+
+    // Read the '+' at the beginning
+    stream
+        .read_exact(&mut byte)
+        .await
+        .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+
+    if byte[0] != b'+' {
+        return Err(CommandReadError::InvalidResponseFromMaster);
+    }
+
+    // Read until \r\n
+    loop {
+        stream
+            .read_exact(&mut byte)
+            .await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+
+        line.push(byte[0]);
+
+        if line.len() >= 2 && line[line.len() - 2] == b'\r' && line[line.len() - 1] == b'\n' {
+            break;
+        }
+    }
+
+    let fullresync_line =
+        String::from_utf8(line).map_err(|_| CommandReadError::InvalidResponseFromMaster)?;
+
+    Ok(RespValue::SimpleString(fullresync_line))
+}
+
+async fn receive_rdb_file(stream: &mut TcpStream) -> Result<(), CommandReadError> {
+    // Read the RDB bulk string header ($<size>\r\n)
+    let mut size_line = Vec::new();
+    let mut byte = [0u8; 1];
+
+    loop {
+        stream
+            .read_exact(&mut byte)
+            .await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+
+        size_line.push(byte[0]);
+
+        if size_line.len() >= 2
+            && size_line[size_line.len() - 2] == b'\r'
+            && size_line[size_line.len() - 1] == b'\n'
+        {
+            break;
+        }
+    }
+
+    // Parse RDB size
+    let size_str = std::str::from_utf8(&size_line[1..size_line.len() - 2]) // Skip $ and \r\n
+        .map_err(CommandReadError::InvalidUtf8)?;
+    let rdb_size: usize = size_str
+        .parse()
+        .map_err(|_| CommandReadError::InvalidResponseFromMaster)?;
+
+    // Stream the RDB data in chunks instead of loading all at once
+    let mut total_received: usize = 0;
+    let mut buffer: [u8; 4096] = [0; 4096]; // 4KB chunks
+
+    while total_received < rdb_size {
+        let remaining = rdb_size - total_received;
+        let chunk_size = std::cmp::min(buffer.len(), remaining);
+
+        stream
+            .read_exact(&mut buffer[..chunk_size])
+            .await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+
+        total_received += chunk_size;
+
+        // Optional: Process RDB chunk here if needed
+        // For now, we just consume it
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

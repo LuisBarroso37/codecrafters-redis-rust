@@ -33,6 +33,7 @@ impl TestEnv {
                 role: RedisRole::Master,
                 repl_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
                 repl_offset: 0,
+                replicas: Some(HashMap::new()),
             })),
         }
     }
@@ -47,6 +48,7 @@ impl TestEnv {
                 role: RedisRole::Replica(("127.0.0.1".to_string(), 6379)),
                 repl_id: "c673350b6868f3661bd1231ad1b5389310d0a201".to_string(),
                 repl_offset: 0,
+                replicas: None,
             })),
         }
     }
@@ -81,14 +83,14 @@ impl TestEnv {
         command: Vec<RespValue>,
         client_address: &str,
     ) -> Result<String, CommandError> {
-        let command_handler = CommandHandler::new(command)?;
+        let command_handler = CommandHandler::new(&command)?;
 
         command_handler
             .handle_command(
-                &self.server,
-                client_address.to_string(),
-                &mut self.store,
-                &mut self.state,
+                Arc::clone(&self.server),
+                client_address,
+                Arc::clone(&self.store),
+                Arc::clone(&self.state),
             )
             .await
     }
@@ -122,8 +124,7 @@ impl TestEnv {
         command: CommandHandler,
         client_address: &str,
     ) -> Result<DispatchResult, DispatchError> {
-        let command_dispatcher =
-            CommandDispatcher::new(client_address.to_string(), self.state.clone());
+        let command_dispatcher = CommandDispatcher::new(client_address, Arc::clone(&self.state));
 
         command_dispatcher.dispatch_command(command).await
     }
@@ -135,7 +136,7 @@ impl TestEnv {
         client_address: &str,
         expected: &str,
     ) {
-        let command_handler = CommandHandler::new(command).unwrap();
+        let command_handler = CommandHandler::new(&command).unwrap();
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
@@ -156,7 +157,7 @@ impl TestEnv {
         client_address: &str,
         expected: &[CommandHandler],
     ) {
-        let command_handler = CommandHandler::new(command).unwrap();
+        let command_handler = CommandHandler::new(&command).unwrap();
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
@@ -177,7 +178,7 @@ impl TestEnv {
         client_address: &str,
         expected_error: DispatchError,
     ) {
-        let command_handler = CommandHandler::new(command).unwrap();
+        let command_handler = CommandHandler::new(&command).unwrap();
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
@@ -192,7 +193,7 @@ impl TestEnv {
         client_address: &str,
         expected: String,
     ) {
-        let command_handler = CommandHandler::new(command).unwrap();
+        let command_handler = CommandHandler::new(&command).unwrap();
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
@@ -201,14 +202,14 @@ impl TestEnv {
         let response = result
             .unwrap()
             .handle_dispatch_result(
-                &self.server,
-                client_address.to_string(),
-                &mut self.store,
-                &mut self.state,
+                Arc::clone(&self.server),
+                client_address,
+                Arc::clone(&self.store),
+                Arc::clone(&self.state),
             )
             .await;
 
-        assert_eq!(response, expected);
+        assert_eq!(response.0, expected);
     }
 
     /// Get a reference to the store for inspection
@@ -506,14 +507,14 @@ impl TestUtils {
         let client_address = client_address.to_string();
 
         tokio::spawn(async move {
-            let command_handler = CommandHandler::new(blpop_command)?;
+            let command_handler = CommandHandler::new(&blpop_command)?;
 
             command_handler
                 .handle_command(
-                    &server_clone,
-                    client_address,
-                    &mut store_clone.clone(),
-                    &mut state_clone.clone(),
+                    Arc::clone(&server_clone),
+                    &client_address,
+                    Arc::clone(&store_clone),
+                    Arc::clone(&state_clone),
                 )
                 .await
         })
@@ -533,14 +534,14 @@ impl TestUtils {
         let client_address = client_address.to_string();
 
         tokio::spawn(async move {
-            let command_handler = CommandHandler::new(xread_blocking_command)?;
+            let command_handler = CommandHandler::new(&xread_blocking_command)?;
 
             command_handler
                 .handle_command(
-                    &server_clone,
-                    client_address,
-                    &mut store_clone.clone(),
-                    &mut state_clone.clone(),
+                    Arc::clone(&server_clone),
+                    &client_address,
+                    Arc::clone(&store_clone),
+                    Arc::clone(&state_clone),
                 )
                 .await
         })

@@ -10,7 +10,7 @@ async fn test_handle_psync_command() {
         (
             TestUtils::psync_command("?", "-1"),
             TestUtils::expected_simple_string(
-                "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb -1",
+                "FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0",
             ),
         ),
         (

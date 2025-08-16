@@ -127,7 +127,7 @@ impl LpopArguments {
 /// // Returns: "*3\r\n$3\r\none\r\n$3\r\ntwo\r\n$5\r\nthree\r\n" (array of elements)
 /// ```
 pub async fn lpop(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let lpop_arguments = LpopArguments::parse(arguments)?;

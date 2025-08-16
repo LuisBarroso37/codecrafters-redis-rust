@@ -35,7 +35,7 @@ impl InfoArguments {
 }
 
 pub async fn info(
-    server: &Arc<RwLock<RedisServer>>,
+    server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let info_arguments = InfoArguments::parse(arguments)?;
@@ -53,8 +53,6 @@ pub async fn info(
     } else {
         replication.push(format!("role:{}", server_role));
     }
-
-    // $92\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\nmaster_repl_offset:0\r\n
 
     match info_arguments.section {
         InfoSection::DEFAULT => Ok(RespValue::BulkString(replication.join("\r\n")).encode()),

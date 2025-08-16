@@ -66,7 +66,7 @@ impl CommandHandler {
     /// ])];
     /// let processor = CommandHandler::new(resp_array)?;
     /// ```
-    pub fn new(input: Vec<RespValue>) -> Result<Self, CommandError> {
+    pub fn new(input: &Vec<RespValue>) -> Result<Self, CommandError> {
         if input.len() != 1 {
             return Err(CommandError::InvalidCommand);
         }
@@ -170,10 +170,10 @@ impl CommandHandler {
     /// - Utility: TYPE
     pub async fn handle_command(
         &self,
-        server: &Arc<RwLock<RedisServer>>,
-        client_address: String,
-        store: &mut Arc<Mutex<KeyValueStore>>,
-        state: &mut Arc<Mutex<State>>,
+        server: Arc<RwLock<RedisServer>>,
+        client_address: &str,
+        store: Arc<Mutex<KeyValueStore>>,
+        state: Arc<Mutex<State>>,
     ) -> Result<String, CommandError> {
         match self.name.as_str() {
             "PING" => ping(self.arguments.clone()),

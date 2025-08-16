@@ -114,14 +114,16 @@ impl BlpopArguments {
 /// // Returns: "*2\r\n$6\r\nmylist\r\n$5\r\nvalue\r\n" (key-value pair) or "$-1\r\n" (timeout)
 /// ```
 pub async fn blpop(
-    client_address: String,
-    store: &mut Arc<Mutex<KeyValueStore>>,
-    state: &mut Arc<Mutex<State>>,
+    client_address: &str,
+    store: Arc<Mutex<KeyValueStore>>,
+    state: Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let blpop_arguments = BlpopArguments::parse(arguments)?;
 
-    if let Some(value) = remove_first_element_from_list(store, &blpop_arguments.key).await {
+    if let Some(value) =
+        remove_first_element_from_list(Arc::clone(&store), &blpop_arguments.key).await
+    {
         return Ok(RespValue::encode_array_from_strings(vec![
             blpop_arguments.key,
             value,
@@ -130,9 +132,9 @@ pub async fn blpop(
 
     let (sender, mut receiver) = oneshot::channel();
     add_subscriber(
-        state,
+        Arc::clone(&state),
         blpop_arguments.key.clone(),
-        client_address.clone(),
+        client_address.to_string(),
         sender,
     )
     .await;
@@ -170,7 +172,7 @@ pub async fn blpop(
 /// * `Some(String)` - The leftmost element if the list exists and has elements
 /// * `None` - If the key doesn't exist, is not a list, or the list is empty
 async fn remove_first_element_from_list(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key: &str,
 ) -> Option<String> {
     let mut store_guard = store.lock().await;
@@ -199,7 +201,7 @@ async fn remove_first_element_from_list(
 /// * `client_address` - The address of the client's server (for identification)
 /// * `sender` - Oneshot sender to notify the subscriber when data becomes available
 async fn add_subscriber(
-    state: &mut Arc<Mutex<State>>,
+    state: Arc<Mutex<State>>,
     key: String,
     client_address: String,
     sender: oneshot::Sender<bool>,
@@ -224,7 +226,7 @@ async fn add_subscriber(
 /// * `state` - A thread-safe reference to the server state
 /// * `key` - The key name the subscriber was waiting for
 /// * `client_address` - The address of the client's server (for identification)
-async fn remove_subscriber(state: &mut Arc<Mutex<State>>, key: &str, client_address: &str) {
+async fn remove_subscriber(state: Arc<Mutex<State>>, key: &str, client_address: &str) {
     let mut state_guard = state.lock().await;
     state_guard.remove_blpop_subscriber(key, &client_address);
 }
@@ -271,7 +273,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_first_element_from_list_success() {
-        let mut store = Arc::new(Mutex::new(KeyValueStore::new()));
+        let store = Arc::new(Mutex::new(KeyValueStore::new()));
 
         let mut list = VecDeque::new();
         list.push_back("first".to_string());
@@ -288,7 +290,7 @@ mod tests {
             store_guard.insert("mylist".to_string(), value);
         }
 
-        let result = remove_first_element_from_list(&mut store, "mylist").await;
+        let result = remove_first_element_from_list(Arc::clone(&store), "mylist").await;
         assert_eq!(result, Some("first".to_string()));
 
         let store_guard = store.lock().await;
@@ -303,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_first_element_from_empty_list() {
-        let mut store = Arc::new(Mutex::new(KeyValueStore::new()));
+        let store = Arc::new(Mutex::new(KeyValueStore::new()));
 
         let empty_list = VecDeque::new();
         let value = Value {
@@ -316,21 +318,21 @@ mod tests {
             store_guard.insert("emptylist".to_string(), value);
         }
 
-        let result = remove_first_element_from_list(&mut store, "emptylist").await;
+        let result = remove_first_element_from_list(store, "emptylist").await;
         assert_eq!(result, None);
     }
 
     #[tokio::test]
     async fn test_remove_first_element_from_nonexistent_key() {
-        let mut store = Arc::new(Mutex::new(KeyValueStore::new()));
+        let store = Arc::new(Mutex::new(KeyValueStore::new()));
 
-        let result = remove_first_element_from_list(&mut store, "nonexistent").await;
+        let result = remove_first_element_from_list(store, "nonexistent").await;
         assert_eq!(result, None);
     }
 
     #[tokio::test]
     async fn test_remove_first_element_from_non_list() {
-        let mut store = Arc::new(Mutex::new(KeyValueStore::new()));
+        let store = Arc::new(Mutex::new(KeyValueStore::new()));
 
         let value = Value {
             data: DataType::String("not a list".to_string()),
@@ -342,17 +344,17 @@ mod tests {
             store_guard.insert("stringkey".to_string(), value);
         }
 
-        let result = remove_first_element_from_list(&mut store, "stringkey").await;
+        let result = remove_first_element_from_list(store, "stringkey").await;
         assert_eq!(result, None);
     }
 
     #[tokio::test]
     async fn test_add_and_remove_subscriber() {
-        let mut state = Arc::new(Mutex::new(State::new()));
+        let state = Arc::new(Mutex::new(State::new()));
         let (sender, _receiver) = oneshot::channel();
 
         add_subscriber(
-            &mut state,
+            Arc::clone(&state),
             "testkey".to_string(),
             "127.0.0.1:6379".to_string(),
             sender,
@@ -377,7 +379,7 @@ mod tests {
             );
         }
 
-        remove_subscriber(&mut state, "testkey", "127.0.0.1:6379").await;
+        remove_subscriber(Arc::clone(&state), "testkey", "127.0.0.1:6379").await;
 
         {
             let state_guard = state.lock().await;

@@ -87,7 +87,7 @@ impl LlenArguments {
 /// // Returns: ":3\r\n" (if list has 3 elements) or ":0\r\n" (if empty/non-existent)
 /// ```
 pub async fn llen(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let llen_arguments = LlenArguments::parse(arguments)?;

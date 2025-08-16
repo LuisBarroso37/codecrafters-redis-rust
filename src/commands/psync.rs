@@ -28,7 +28,7 @@ impl PsyncArguments {
 }
 
 pub async fn psync(
-    server: &Arc<RwLock<RedisServer>>,
+    server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let psync_arguments = PsyncArguments::parse(arguments)?;
