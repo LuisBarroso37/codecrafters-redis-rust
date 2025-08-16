@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::{
     net::TcpStream,
     sync::{Mutex, RwLock},
@@ -15,7 +16,7 @@ use crate::{
 };
 
 pub async fn handle_client_connection(
-    stream: Arc<Mutex<TcpStream>>,
+    stream: TcpStream,
     server: Arc<RwLock<RedisServer>>,
     client_address: String,
     store: Arc<Mutex<KeyValueStore>>,
@@ -23,8 +24,11 @@ pub async fn handle_client_connection(
 ) {
     let mut buffer = [0; 1024];
 
+    let (mut reader, writer) = stream.into_split();
+    let writer = Arc::new(RwLock::new(writer));
+
     loop {
-        let parsed_input = match read_and_parse_resp(Arc::clone(&stream), &mut buffer).await {
+        let parsed_input = match read_and_parse_resp(&mut reader, &mut buffer).await {
             Ok(cmd) => cmd,
             Err(e) => match e {
                 CommandReadError::ConnectionClosed => {
@@ -37,8 +41,11 @@ pub async fn handle_client_connection(
                     break;
                 }
                 _ => {
-                    let mut stream_guard = stream.lock().await;
-                    let _ = stream_guard.write_all(e.as_string().as_bytes()).await;
+                    if let Err(e) =
+                        write_to_stream(Arc::clone(&writer), e.as_string().as_bytes()).await
+                    {
+                        eprintln!("Error writing to stream: {}", e);
+                    }
                     continue;
                 }
             },
@@ -46,8 +53,10 @@ pub async fn handle_client_connection(
         let command_handler = match CommandHandler::new(&parsed_input) {
             Ok(handler) => handler,
             Err(e) => {
-                let mut stream_guard = stream.lock().await;
-                let _ = stream_guard.write_all(e.as_string().as_bytes()).await;
+                if let Err(e) = write_to_stream(Arc::clone(&writer), e.as_string().as_bytes()).await
+                {
+                    eprintln!("Error writing to stream: {}", e);
+                }
                 continue;
             }
         };
@@ -58,8 +67,10 @@ pub async fn handle_client_connection(
         {
             Ok(result) => result,
             Err(e) => {
-                let mut stream_guard = stream.lock().await;
-                let _ = stream_guard.write_all(e.as_string().as_bytes()).await;
+                if let Err(e) = write_to_stream(Arc::clone(&writer), e.as_string().as_bytes()).await
+                {
+                    eprintln!("Error writing to stream: {}", e);
+                }
                 continue;
             }
         };
@@ -73,31 +84,29 @@ pub async fn handle_client_connection(
             )
             .await;
 
-        {
-            let mut stream_guard = stream.lock().await;
-            
-            // For PSYNC, enable TCP_NODELAY to force immediate FULLRESYNC sending
-            if response.to_lowercase().contains("fullresync") {
-                let _ = stream_guard.set_nodelay(true);
-                let _ = stream_guard.write_all(response.as_bytes()).await;
-                let _ = stream_guard.set_nodelay(false);
-            } else {
-                let _ = stream_guard.write_all(response.as_bytes()).await;
-            }
+        if let Err(e) = write_to_stream(Arc::clone(&writer), response.as_bytes()).await {
+            eprintln!("Error writing response to stream: {}", e);
+            continue;
         }
 
         if let Some(extra_action) = extra_action {
-            if let Some(action_response) = handle_extra_action(
+            match handle_extra_action(
                 parsed_input,
                 &client_address,
-                Arc::clone(&stream),
+                Arc::clone(&writer),
                 Arc::clone(&server),
                 extra_action,
             )
             .await
             {
-                let mut stream_guard = stream.lock().await;
-                let _ = stream_guard.write_all(action_response.as_slice()).await;
+                Ok(()) => (),
+                Err(e) => {
+                    if let Err(e) =
+                        write_to_stream(Arc::clone(&writer), e.to_string().as_bytes()).await
+                    {
+                        eprintln!("Error writing to stream: {}", e);
+                    }
+                }
             }
         }
     }
@@ -105,7 +114,7 @@ pub async fn handle_client_connection(
 
 pub async fn handle_master_connection(
     master_address: &str,
-    stream: Arc<Mutex<TcpStream>>,
+    stream: &mut TcpStream,
     server: Arc<RwLock<RedisServer>>,
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
@@ -113,7 +122,7 @@ pub async fn handle_master_connection(
     let mut buffer = [0; 1024];
 
     loop {
-        let parsed_input = match read_and_parse_resp(Arc::clone(&stream), &mut buffer).await {
+        let parsed_input = match read_and_parse_resp(stream, &mut buffer).await {
             Ok(cmd) => cmd,
             Err(e) => match e {
                 CommandReadError::ConnectionClosed => {
@@ -147,4 +156,15 @@ pub async fn handle_master_connection(
             }
         }
     }
+}
+
+pub async fn write_to_stream(
+    writer: Arc<RwLock<OwnedWriteHalf>>,
+    response: &[u8],
+) -> tokio::io::Result<()> {
+    let mut writer_guard = writer.write().await;
+    writer_guard.write_all(response).await?;
+    writer_guard.flush().await?;
+
+    Ok(())
 }

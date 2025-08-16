@@ -4,6 +4,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{Mutex, RwLock},
@@ -46,7 +47,7 @@ pub struct RedisServer {
     pub role: RedisRole,
     pub repl_id: String,
     pub repl_offset: u64,
-    pub replicas: Option<HashMap<String, Arc<Mutex<TcpStream>>>>,
+    pub replicas: Option<HashMap<String, Arc<RwLock<OwnedWriteHalf>>>>,
 }
 
 impl RedisServer {
@@ -108,7 +109,7 @@ impl RedisServer {
             RedisRole::Replica((address, port)) => {
                 let master_address = format!("{}:{}", address, port);
 
-                let stream = match TcpStream::connect(&master_address).await {
+                let mut stream = match TcpStream::connect(&master_address).await {
                     Ok(stream) => stream,
                     Err(e) => {
                         eprintln!("Failed to connect to replica: {}", e);
@@ -119,26 +120,22 @@ impl RedisServer {
                 let server_clone = Arc::clone(&server);
                 let store_clone = Arc::clone(&store);
                 let state_clone = Arc::clone(&state);
-                let stream = Arc::new(Mutex::new(stream));
 
-                match handshake(Arc::clone(&stream), Arc::clone(&server)).await {
-                    Ok(_) => {
-                        tokio::spawn(async move {
-                            handle_master_connection(
-                                &master_address,
-                                stream,
-                                server_clone,
-                                store_clone,
-                                state_clone,
-                            )
-                            .await;
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to perform handshake: {}", e);
-                        return;
-                    }
-                }
+                if let Err(e) = handshake(&mut stream, Arc::clone(&server)).await {
+                    eprintln!("Failed to perform handshake: {}", e);
+                    return;
+                };
+
+                tokio::spawn(async move {
+                    handle_master_connection(
+                        &master_address,
+                        &mut stream,
+                        server_clone,
+                        store_clone,
+                        state_clone,
+                    )
+                    .await;
+                });
             }
             _ => (),
         }
@@ -165,11 +162,10 @@ impl RedisServer {
                     let server_clone = Arc::clone(&server);
                     let store_clone = Arc::clone(&store);
                     let state_clone = Arc::clone(&state);
-                    let thread_safe_stream = Arc::new(Mutex::new(stream));
 
                     tokio::spawn(async move {
                         handle_client_connection(
-                            thread_safe_stream,
+                            stream,
                             server_clone,
                             client_address,
                             store_clone,

@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::{
     fs::File,
     io::{AsyncReadExt, BufReader},
-    net::TcpStream,
     sync::{Mutex, RwLock},
 };
 
@@ -65,31 +65,31 @@ pub enum ExtraAction {
 pub async fn handle_extra_action(
     parsed_input: Vec<RespValue>,
     client_address: &str,
-    stream: Arc<Mutex<TcpStream>>,
+    writer: Arc<RwLock<OwnedWriteHalf>>,
     server: Arc<RwLock<RedisServer>>,
     action: ExtraAction,
-) -> Option<Vec<u8>> {
+) -> tokio::io::Result<()> {
     match action {
         ExtraAction::SendRdbFile => {
             // Stream RDB file instead of loading it all into memory
-            let file = File::open("empty.rdb").await.unwrap();
-            let file_size = file.metadata().await.unwrap().len();
-            
+            let file = File::open("empty.rdb").await?;
+            let file_size = file.metadata().await?.len();
+
             // First send the bulk string header
             let header = format!("${}\r\n", file_size);
-            
-            let mut stream_guard = stream.lock().await;
-            stream_guard.write_all(header.as_bytes()).await.unwrap();
-            
+
+            let mut writer_guard = writer.write().await;
+            writer_guard.write_all(header.as_bytes()).await?;
+
             // Stream the file contents in chunks
             let mut reader = BufReader::new(file);
             let mut buffer = [0u8; 4096]; // 4KB chunks
-            
+
             loop {
                 match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
                     Ok(n) => {
-                        stream_guard.write_all(&buffer[..n]).await.unwrap();
+                        writer_guard.write_all(&buffer[..n]).await?;
                     }
                     Err(e) => {
                         eprintln!("Error streaming RDB file: {}", e);
@@ -97,32 +97,32 @@ pub async fn handle_extra_action(
                     }
                 }
             }
-            
-            stream_guard.flush().await.unwrap();
-            drop(stream_guard); // Release the lock
-            
+
+            writer_guard.flush().await?;
+            drop(writer_guard); // Release the lock
+
             // Add replica to replication list after successful RDB streaming
             let mut server_guard = server.write().await;
             if let Some(replicas) = &mut server_guard.replicas {
-                replicas.insert(client_address.to_string(), stream);
+                replicas.insert(client_address.to_string(), writer);
             }
 
-            None // Return None since we handled the streaming directly
+            Ok(())
         }
         ExtraAction::SendWriteCommand => {
-            let mut server_guard = server.write().await;
+            let server_guard = server.read().await;
 
-            if let Some(replicas) = &mut server_guard.replicas {
+            if let Some(ref replicas) = server_guard.replicas {
                 for replica in replicas.values() {
-                    let mut replica_guard = replica.lock().await;
+                    let mut replica_guard = replica.write().await;
                     replica_guard
                         .write_all(parsed_input[0].encode().as_bytes())
-                        .await
-                        .unwrap();
+                        .await?;
+                    replica_guard.flush().await?;
                 }
             }
 
-            None
+            Ok(())
         }
     }
 }
