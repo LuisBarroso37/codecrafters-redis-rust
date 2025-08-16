@@ -4,9 +4,9 @@ use regex::Regex;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
-use crate::commands::{CommandError, CommandHandler};
+use crate::commands::CommandError;
 use crate::resp::{RespError, RespValue};
 use crate::server::RedisServer;
 
@@ -20,8 +20,6 @@ pub enum CommandReadError {
     InvalidUtf8(#[from] std::str::Utf8Error),
     #[error("RESP parse error")]
     RespParseError(#[from] RespError),
-    #[error("Failed to get client address")]
-    ClientAddressError,
     #[error("Command construction error")]
     CommandError(#[from] CommandError),
     #[error("Invalid response from master")]
@@ -37,9 +35,6 @@ impl CommandReadError {
             }
             CommandReadError::InvalidUtf8(err) => RespValue::Error(format!("Err {}", err)).encode(),
             CommandReadError::RespParseError(err) => err.as_string(),
-            CommandReadError::ClientAddressError => {
-                RespValue::Error("Err failed to get client address".to_string()).encode()
-            }
             CommandReadError::CommandError(err) => err.as_string(),
             CommandReadError::InvalidResponseFromMaster => {
                 RespValue::Error("Err invalid response from master".to_string()).encode()
@@ -79,44 +74,43 @@ pub fn parse_input(input: &[u8]) -> Result<Vec<&str>, CommandReadError> {
         .collect::<Vec<&str>>())
 }
 
-async fn read_and_parse_resp(stream: &mut TcpStream) -> Result<Vec<RespValue>, CommandReadError> {
-    let mut buf = [0; 1024];
-    let number_of_bytes = match stream.read(&mut buf).await {
-        Ok(n) => n,
-        Err(e) => return Err(CommandReadError::IoError(e.to_string())),
+pub async fn read_and_parse_resp(
+    stream: Arc<Mutex<TcpStream>>,
+    buffer: &mut [u8; 1024],
+) -> Result<Vec<RespValue>, CommandReadError> {
+    let number_of_bytes = {
+        let mut stream_guard = stream.lock().await;
+
+        match stream_guard.read(buffer).await {
+            Ok(n) => n,
+            Err(e) => return Err(CommandReadError::IoError(e.to_string())),
+        }
     };
 
     if number_of_bytes == 0 {
         return Err(CommandReadError::ConnectionClosed);
     }
 
-    let input = parse_input(&buf)?;
+    println!(
+        "Received {} bytes - {:?}",
+        number_of_bytes,
+        String::from_utf8_lossy(&buffer[..number_of_bytes])
+    );
+    let input = parse_input(&buffer[..number_of_bytes])?;
     let parsed_input = RespValue::parse(input)?;
 
     Ok(parsed_input)
 }
 
-pub async fn read_and_parse_command(
-    stream: &mut TcpStream,
-) -> Result<(CommandHandler, String), CommandReadError> {
-    let parsed_input = read_and_parse_resp(stream).await?;
-
-    let client_address = match stream.peer_addr() {
-        Ok(address) => address.to_string(),
-        Err(_) => return Err(CommandReadError::ClientAddressError),
-    };
-
-    let command_handler = CommandHandler::new(parsed_input)?;
-
-    Ok((command_handler, client_address))
-}
-
 pub async fn handshake(
-    stream: &mut TcpStream,
-    server: &Arc<RwLock<RedisServer>>,
+    stream: Arc<Mutex<TcpStream>>,
+    server: Arc<RwLock<RedisServer>>,
 ) -> Result<(), CommandReadError> {
+    let mut buffer: [u8; 1024] = [0; 1024];
+
     let response = send_and_handle_handshake_command(
-        stream,
+        &mut buffer,
+        Arc::clone(&stream),
         RespValue::Array(vec![RespValue::BulkString("PING".to_string())]),
     )
     .await?;
@@ -128,7 +122,8 @@ pub async fn handshake(
     {
         let server_guard = server.read().await;
         let response = send_and_handle_handshake_command(
-            stream,
+            &mut buffer,
+            Arc::clone(&stream),
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".to_string()),
                 RespValue::BulkString("listening-port".to_string()),
@@ -143,7 +138,8 @@ pub async fn handshake(
     }
 
     let response = send_and_handle_handshake_command(
-        stream,
+        &mut buffer,
+        Arc::clone(&stream),
         RespValue::Array(vec![
             RespValue::BulkString("REPLCONF".to_string()),
             RespValue::BulkString("capa".to_string()),
@@ -157,6 +153,7 @@ pub async fn handshake(
     }
 
     let response = send_and_handle_handshake_command(
+        &mut buffer,
         stream,
         RespValue::Array(vec![
             RespValue::BulkString("PSYNC".to_string()),
@@ -168,22 +165,26 @@ pub async fn handshake(
 
     match response {
         RespValue::Array(split_response) => {
-            if split_response[0] == RespValue::BulkString("FULLRESYNC".to_string()) {
-                let parts: Vec<&str> = split_response[1..]
-                    .iter()
-                    .filter_map(|v| {
-                        if let RespValue::BulkString(s) = v {
-                            Some(s.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+            if split_response[0] != RespValue::BulkString("FULLRESYNC".to_string()) {
+                return Err(CommandReadError::InvalidResponseFromMaster);
+            }
 
-                if parts.len() != 3 || !is_valid_repl_id(parts[1]) || parts[2] == "0" {
-                    return Err(CommandReadError::InvalidResponseFromMaster);
-                }
-            } else {
+            let parts: Vec<&str> = split_response[1..]
+                .iter()
+                .filter_map(|v| {
+                    if let RespValue::BulkString(s) = v {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            println!(
+                "Received FULLRESYNC response, {:?} {:?}",
+                split_response, parts
+            );
+
+            if parts.len() != 3 || !is_valid_repl_id(parts[1]) || parts[2] == "0" {
                 return Err(CommandReadError::InvalidResponseFromMaster);
             }
         }
@@ -201,19 +202,24 @@ fn is_valid_repl_id(repl_id: &str) -> bool {
 }
 
 async fn send_and_handle_handshake_command(
-    stream: &mut TcpStream,
+    buffer: &mut [u8; 1024],
+    stream: Arc<Mutex<TcpStream>>,
     command: RespValue,
 ) -> Result<RespValue, CommandReadError> {
-    stream
-        .write_all(command.encode().as_bytes())
-        .await
-        .map_err(|e| CommandReadError::IoError(e.to_string()))?;
-    stream
-        .flush()
-        .await
-        .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+    {
+        let mut stream_guard = stream.lock().await;
 
-    let resp_value = read_and_parse_resp(stream).await?;
+        stream_guard
+            .write_all(command.encode().as_bytes())
+            .await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+        stream_guard
+            .flush()
+            .await
+            .map_err(|e| CommandReadError::IoError(e.to_string()))?;
+    }
+
+    let resp_value = read_and_parse_resp(stream, buffer).await?;
 
     if resp_value.len() != 1 {
         return Err(CommandReadError::InvalidResponseFromMaster);

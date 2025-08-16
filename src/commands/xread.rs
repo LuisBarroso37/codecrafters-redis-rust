@@ -149,24 +149,25 @@ impl XreadArguments {
 /// ).await?;
 /// ```
 pub async fn xread(
-    client_address: String,
-    store: &mut Arc<Mutex<KeyValueStore>>,
-    state: &mut Arc<Mutex<State>>,
+    client_address: &str,
+    store: Arc<Mutex<KeyValueStore>>,
+    state: Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let xread_arguments = XreadArguments::parse(arguments)?;
 
-    let parsed_stream_ids = match parse_stream_ids(store, xread_arguments.key_stream_pairs).await {
-        Ok(ids) => ids,
-        Err(CommandError::DataNotFound) => return Ok(RespValue::Array(Vec::new()).encode()),
-        Err(e) => return Err(e),
-    };
+    let parsed_stream_ids =
+        match parse_stream_ids(Arc::clone(&store), xread_arguments.key_stream_pairs).await {
+            Ok(ids) => ids,
+            Err(CommandError::DataNotFound) => return Ok(RespValue::Array(Vec::new()).encode()),
+            Err(e) => return Err(e),
+        };
 
     let Some(blocking_duration_ms) = xread_arguments.blocking_duration else {
         return read_streams(store, parsed_stream_ids).await;
     };
 
-    let direct_call_response = read_streams(store, parsed_stream_ids.clone()).await?;
+    let direct_call_response = read_streams(Arc::clone(&store), parsed_stream_ids.clone()).await?;
 
     if direct_call_response != RespValue::Array(Vec::new()).encode() {
         return Ok(direct_call_response);
@@ -174,9 +175,9 @@ pub async fn xread(
 
     let (sender, mut receiver) = mpsc::channel(32);
     add_subscribers(
-        state,
+        Arc::clone(&state),
         &parsed_stream_ids,
-        client_address.clone(),
+        client_address,
         sender.clone(),
     )
     .await;
@@ -216,7 +217,7 @@ pub async fn xread(
 /// let resolved = parse_stream_ids(&mut store, pairs).await?;
 /// ```
 async fn parse_stream_ids(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key_stream_id_pairs: Vec<(String, String)>,
 ) -> Result<Vec<(String, String)>, CommandError> {
     let mut parsed_key_stream_id_pairs: Vec<(String, String)> =
@@ -224,7 +225,7 @@ async fn parse_stream_ids(
 
     for (key, stream_id) in key_stream_id_pairs {
         let parsed_stream_id = if stream_id == "$" {
-            resolve_special_id(store, &key).await?
+            resolve_special_id(Arc::clone(&store), &key).await?
         } else {
             stream_id
         };
@@ -259,7 +260,7 @@ async fn parse_stream_ids(
 /// // Returns: "3000-5"
 /// ```
 async fn resolve_special_id(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key: &str,
 ) -> Result<String, CommandError> {
     let store_guard = store.lock().await;
@@ -292,14 +293,14 @@ async fn resolve_special_id(
 /// * `client_address` - Unique identifier for the client instance
 /// * `sender` - Channel sender for notifications
 async fn add_subscribers(
-    state: &mut Arc<Mutex<State>>,
+    state: Arc<Mutex<State>>,
     key_stream_id_pairs: &Vec<(String, String)>,
-    client_address: String,
+    client_address: &str,
     sender: mpsc::Sender<bool>,
 ) {
     for (key, stream_id) in key_stream_id_pairs {
         let subscriber = XreadSubscriber {
-            client_address: client_address.clone(),
+            client_address: client_address.to_string(),
             sender: sender.clone(),
         };
 
@@ -319,7 +320,7 @@ async fn add_subscribers(
 /// * `key_stream_id_pairs` - Stream keys and IDs to unsubscribe from
 /// * `client_address` - Client instance identifier used during subscription
 async fn remove_subscribers(
-    state: &mut Arc<Mutex<State>>,
+    state: Arc<Mutex<State>>,
     key_stream_id_pairs: &Vec<(String, String)>,
     client_address: &str,
 ) {
@@ -388,7 +389,7 @@ async fn wait_for_data(
 /// ]
 /// ```
 async fn read_streams(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     key_stream_id_pairs: Vec<(String, String)>,
 ) -> Result<String, CommandError> {
     let store_guard = store.lock().await;
@@ -579,7 +580,7 @@ mod tests {
             },
         );
 
-        let mut key_value_store = Arc::new(Mutex::new(store));
+        let key_value_store = Arc::new(Mutex::new(store));
 
         let test_cases = vec![
             (
@@ -608,7 +609,7 @@ mod tests {
 
         for (input, expected_result) in test_cases {
             assert_eq!(
-                parse_stream_ids(&mut key_value_store, input.clone()).await,
+                parse_stream_ids(Arc::clone(&key_value_store), input.clone()).await,
                 expected_result,
                 "Failed for input: {:?}",
                 input
@@ -647,7 +648,7 @@ mod tests {
             },
         );
 
-        let mut key_value_store = Arc::new(Mutex::new(store));
+        let key_value_store = Arc::new(Mutex::new(store));
 
         let test_cases = vec![
             ("mystream", Ok("3000-10".to_string())),
@@ -658,7 +659,7 @@ mod tests {
 
         for (key, expected_result) in test_cases {
             assert_eq!(
-                resolve_special_id(&mut key_value_store, key).await,
+                resolve_special_id(Arc::clone(&key_value_store), key).await,
                 expected_result,
                 "Failed for key: {}",
                 key
@@ -668,7 +669,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_and_remove_subscribers() {
-        let mut state = Arc::new(Mutex::new(State::new()));
+        let state = Arc::new(Mutex::new(State::new()));
         let (sender, _receiver) = mpsc::channel(32);
 
         let key_stream_pairs = vec![
@@ -679,9 +680,9 @@ mod tests {
         let client_address = "server-1".to_string();
 
         add_subscribers(
-            &mut state,
+            Arc::clone(&state),
             &key_stream_pairs,
-            client_address.clone(),
+            &client_address,
             sender,
         )
         .await;
@@ -709,7 +710,7 @@ mod tests {
             }
         }
 
-        remove_subscribers(&mut state, &key_stream_pairs, &client_address).await;
+        remove_subscribers(Arc::clone(&state), &key_stream_pairs, &client_address).await;
 
         {
             let state_guard = state.lock().await;
@@ -808,7 +809,7 @@ mod tests {
             },
         );
 
-        let mut key_value_store = Arc::new(Mutex::new(store));
+        let key_value_store = Arc::new(Mutex::new(store));
 
         let test_cases = vec![
             (
@@ -839,7 +840,7 @@ mod tests {
 
         for (input, expected_result) in test_cases {
             assert_eq!(
-                read_streams(&mut key_value_store, input.clone()).await,
+                read_streams(Arc::clone(&key_value_store), input.clone()).await,
                 expected_result,
                 "Failed for input: {:?}",
                 input

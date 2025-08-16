@@ -104,7 +104,7 @@ impl LrangeArguments {
 /// // Returns: "*2\r\n$3\r\nval4\r\n$3\r\nval5\r\n"
 /// ```
 pub async fn lrange(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let lrange_arguments = LrangeArguments::parse(arguments)?;

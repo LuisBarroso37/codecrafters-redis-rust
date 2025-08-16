@@ -75,7 +75,7 @@ impl GetArguments {
 /// // Returns: "$5\r\nhello\r\n" or "$-1\r\n" (null)
 /// ```
 pub async fn get(
-    store: &mut Arc<Mutex<KeyValueStore>>,
+    store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     let get_arguments = GetArguments::parse(arguments)?;

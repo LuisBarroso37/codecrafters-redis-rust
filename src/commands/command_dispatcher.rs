@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock};
+use tokio::io::AsyncWriteExt;
+use tokio::{
+    net::TcpStream,
+    sync::{Mutex, RwLock},
+};
 
 use crate::{
     commands::{CommandError, CommandHandler},
@@ -52,20 +56,47 @@ impl DispatchError {
 }
 
 pub enum ExtraAction {
-    SendRdb
+    SendRdb,
+    SendWriteCommand,
 }
 
-pub async fn handle_extra_action(action: ExtraAction) -> Vec<u8> {
+pub async fn handle_extra_action(
+    parsed_input: Vec<RespValue>,
+    client_address: &str,
+    stream: Arc<Mutex<TcpStream>>,
+    server: Arc<RwLock<RedisServer>>,
+    action: ExtraAction,
+) -> Option<Vec<u8>> {
     match action {
         ExtraAction::SendRdb => {
             let contents = tokio::fs::read("empty.rdb").await.unwrap();
 
-
             let mut response = format!("${}\r\n", contents.len()).into_bytes();
             response.extend_from_slice(&contents);
 
-            return response;
-        },
+            let mut server_guard = server.write().await;
+
+            if let Some(replicas) = &mut server_guard.replicas {
+                replicas.insert(client_address.to_string(), stream);
+            }
+
+            Some(response)
+        }
+        ExtraAction::SendWriteCommand => {
+            let mut server_guard = server.write().await;
+
+            if let Some(replicas) = &mut server_guard.replicas {
+                for replica in replicas.values() {
+                    let mut replica_guard = replica.lock().await;
+                    replica_guard
+                        .write_all(parsed_input[0].encode().as_bytes())
+                        .await
+                        .unwrap();
+                }
+            }
+
+            None
+        }
     }
 }
 
@@ -99,10 +130,10 @@ impl DispatchResult {
     /// * `String` - A RESP-encoded response to be sent to the client
     pub async fn handle_dispatch_result(
         &self,
-        server: &Arc<RwLock<RedisServer>>,
-        client_address: String,
-        store: &mut Arc<Mutex<KeyValueStore>>,
-        state: &mut Arc<Mutex<State>>,
+        server: Arc<RwLock<RedisServer>>,
+        client_address: &str,
+        store: Arc<Mutex<KeyValueStore>>,
+        state: Arc<Mutex<State>>,
     ) -> (String, Option<ExtraAction>) {
         match self {
             DispatchResult::ImmediateResponse(value) => (value.clone(), None),
@@ -111,10 +142,19 @@ impl DispatchResult {
 
                 if command.name == "PSYNC" {
                     extra_action = Some(ExtraAction::SendRdb);
+                } else if Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"])
+                    .contains(&command.name.as_str())
+                {
+                    extra_action = Some(ExtraAction::SendWriteCommand);
                 }
-                
+
                 match command
-                    .handle_command(server, client_address.clone(), store, state)
+                    .handle_command(
+                        Arc::clone(&server),
+                        client_address,
+                        Arc::clone(&store),
+                        Arc::clone(&state),
+                    )
                     .await
                 {
                     Ok(resp) => (resp, extra_action),
@@ -127,7 +167,12 @@ impl DispatchResult {
 
                 for cmd in commands {
                     match cmd
-                        .handle_command(server, client_address.clone(), store, state)
+                        .handle_command(
+                            Arc::clone(&server),
+                            client_address,
+                            Arc::clone(&store),
+                            Arc::clone(&state),
+                        )
                         .await
                     {
                         Ok(resp) => {
@@ -159,9 +204,9 @@ pub struct CommandDispatcher {
 
 impl CommandDispatcher {
     /// Creates a new `CommandDispatcher` with the given server address and state.
-    pub fn new(client_address: String, state: Arc<Mutex<State>>) -> Self {
+    pub fn new(client_address: &str, state: Arc<Mutex<State>>) -> Self {
         CommandDispatcher {
-            client_address,
+            client_address: client_address.to_string(),
             state,
         }
     }

@@ -84,8 +84,8 @@ impl PushArrayOperations {
 /// // Returns: ":2\r\n" (new length of the list)
 /// ```
 pub async fn rpush(
-    store: &mut Arc<Mutex<KeyValueStore>>,
-    state: &mut Arc<Mutex<State>>,
+    store: Arc<Mutex<KeyValueStore>>,
+    state: Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     return push_array_operations(store, state, arguments, false).await;
@@ -117,8 +117,8 @@ pub async fn rpush(
 /// // Returns: ":2\r\n" (new length of the list)
 /// ```
 pub async fn lpush(
-    store: &mut Arc<Mutex<KeyValueStore>>,
-    state: &mut Arc<Mutex<State>>,
+    store: Arc<Mutex<KeyValueStore>>,
+    state: Arc<Mutex<State>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
     return push_array_operations(store, state, arguments, true).await;
@@ -141,8 +141,8 @@ pub async fn lpush(
 /// * `Ok(String)` - A RESP-encoded integer representing the new length of the list
 /// * `Err(CommandError)` - Various errors based on input validation or data type conflicts
 async fn push_array_operations(
-    store: &mut Arc<Mutex<KeyValueStore>>,
-    state: &mut Arc<Mutex<State>>,
+    store: Arc<Mutex<KeyValueStore>>,
+    state: Arc<Mutex<State>>,
     arguments: Vec<String>,
     should_prepend: bool,
 ) -> Result<String, CommandError> {
