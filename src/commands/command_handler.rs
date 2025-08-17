@@ -66,12 +66,8 @@ impl CommandHandler {
     /// ])];
     /// let processor = CommandHandler::new(resp_array)?;
     /// ```
-    pub fn new(input: &Vec<RespValue>) -> Result<Self, CommandError> {
-        if input.len() != 1 {
-            return Err(CommandError::InvalidCommand);
-        }
-
-        let Some(RespValue::Array(elements)) = input.get(0) else {
+    pub fn new(input: &RespValue) -> Result<Self, CommandError> {
+        let RespValue::Array(elements) = input else {
             return Err(CommandError::InvalidCommand);
         };
 

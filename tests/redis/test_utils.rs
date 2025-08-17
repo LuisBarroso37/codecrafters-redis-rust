@@ -34,6 +34,7 @@ impl TestEnv {
                 repl_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
                 repl_offset: 0,
                 replicas: Some(HashMap::new()),
+                write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"],
             })),
         }
     }
@@ -49,6 +50,7 @@ impl TestEnv {
                 repl_id: "c673350b6868f3661bd1231ad1b5389310d0a201".to_string(),
                 repl_offset: 0,
                 replicas: None,
+                write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"],
             })),
         }
     }
@@ -80,7 +82,7 @@ impl TestEnv {
     /// Execute a command and return the result
     async fn exec_command(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
     ) -> Result<String, CommandError> {
         let command_handler = CommandHandler::new(&command)?;
@@ -98,7 +100,7 @@ impl TestEnv {
     /// Execute a command and assert it succeeds with expected result
     pub async fn exec_command_ok(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
         expected: &str,
     ) {
@@ -109,7 +111,7 @@ impl TestEnv {
     /// Execute a command and assert it fails
     pub async fn exec_command_err(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
         expected_error: CommandError,
     ) {
@@ -132,7 +134,7 @@ impl TestEnv {
     /// Execute a transaction command and assert it succeeds with an immediate response
     pub async fn exec_transaction_immediate_response(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
         expected: &str,
     ) {
@@ -153,7 +155,7 @@ impl TestEnv {
     /// Execute a transaction command and assert it returns the expected commands
     pub async fn exec_transaction_expected_commands(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
         expected: &[CommandHandler],
     ) {
@@ -174,7 +176,7 @@ impl TestEnv {
     /// Execute a transaction command and assert it fails
     pub async fn exec_transaction_err(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
         expected_error: DispatchError,
     ) {
@@ -189,7 +191,7 @@ impl TestEnv {
     /// Execute queued transaction commands and assert it returns the expected response
     pub async fn exec_transaction_execute_commands(
         &mut self,
-        command: Vec<RespValue>,
+        command: RespValue,
         client_address: &str,
         expected: String,
     ) {
@@ -225,16 +227,16 @@ impl TestEnv {
 
 impl TestUtils {
     /// Create a BLPOP command
-    pub fn blpop_command(key: &str, timeout_seconds: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn blpop_command(key: &str, timeout_seconds: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("BLPOP".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(timeout_seconds.to_string()),
-        ])]
+        ])
     }
 
     /// Create an RPUSH command with multiple values
-    pub fn rpush_command(key: &str, values: &[&str]) -> Vec<RespValue> {
+    pub fn rpush_command(key: &str, values: &[&str]) -> RespValue {
         let mut command = vec![
             RespValue::BulkString("RPUSH".to_string()),
             RespValue::BulkString(key.to_string()),
@@ -244,11 +246,11 @@ impl TestUtils {
             command.push(RespValue::BulkString(value.to_string()));
         }
 
-        vec![RespValue::Array(command)]
+        RespValue::Array(command)
     }
 
     /// Create an LPUSH command with multiple values
-    pub fn lpush_command(key: &str, values: &[&str]) -> Vec<RespValue> {
+    pub fn lpush_command(key: &str, values: &[&str]) -> RespValue {
         let mut command = vec![
             RespValue::BulkString("LPUSH".to_string()),
             RespValue::BulkString(key.to_string()),
@@ -258,101 +260,95 @@ impl TestUtils {
             command.push(RespValue::BulkString(value.to_string()));
         }
 
-        vec![RespValue::Array(command)]
+        RespValue::Array(command)
     }
 
     /// Create an LLEN command
-    pub fn llen_command(key: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn llen_command(key: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("LLEN".to_string()),
             RespValue::BulkString(key.to_string()),
-        ])]
+        ])
     }
 
     /// Create an LRANGE command
-    pub fn lrange_command(key: &str, start: i32, stop: i32) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn lrange_command(key: &str, start: i32, stop: i32) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("LRANGE".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(start.to_string()),
             RespValue::BulkString(stop.to_string()),
-        ])]
+        ])
     }
 
     /// Create an LPOP command
-    pub fn lpop_command(key: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn lpop_command(key: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("LPOP".to_string()),
             RespValue::BulkString(key.to_string()),
-        ])]
+        ])
     }
 
     /// Create an LPOP command for mutiple items
-    pub fn lpop_command_multiple_items(key: &str, num_items: u32) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn lpop_command_multiple_items(key: &str, num_items: u32) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("LPOP".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(num_items.to_string()),
-        ])]
+        ])
     }
 
     /// Create a PING command
-    pub fn ping_command() -> Vec<RespValue> {
-        vec![RespValue::Array(vec![RespValue::BulkString(
-            "PING".to_string(),
-        )])]
+    pub fn ping_command() -> RespValue {
+        RespValue::Array(vec![RespValue::BulkString("PING".to_string())])
     }
 
     /// Create an ECHO command
-    pub fn echo_command(message: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn echo_command(message: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("ECHO".to_string()),
             RespValue::BulkString(message.to_string()),
-        ])]
+        ])
     }
 
     /// Create a GET command
-    pub fn get_command(key: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn get_command(key: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("GET".to_string()),
             RespValue::BulkString(key.to_string()),
-        ])]
+        ])
     }
 
     /// Create a SET command
-    pub fn set_command(key: &str, value: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn set_command(key: &str, value: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("SET".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(value.to_string()),
-        ])]
+        ])
     }
 
     /// Create a SET command with expiration
-    pub fn set_command_with_expiration(
-        key: &str,
-        value: &str,
-        expiration_ms: u64,
-    ) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn set_command_with_expiration(key: &str, value: &str, expiration_ms: u64) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("SET".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(value.to_string()),
             RespValue::BulkString("px".to_string()),
             RespValue::BulkString(expiration_ms.to_string()),
-        ])]
+        ])
     }
 
     /// Create a TYPE command
-    pub fn type_command(key: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn type_command(key: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("TYPE".to_string()),
             RespValue::BulkString(key.to_string()),
-        ])]
+        ])
     }
 
     /// Create a XADD command
-    pub fn xadd_command(key: &str, stream_id: &str, entries: &[&str]) -> Vec<RespValue> {
+    pub fn xadd_command(key: &str, stream_id: &str, entries: &[&str]) -> RespValue {
         let mut vec = vec![
             RespValue::BulkString("XADD".to_string()),
             RespValue::BulkString(key.to_string()),
@@ -363,21 +359,21 @@ impl TestUtils {
             vec.push(RespValue::BulkString(entry.to_string()));
         }
 
-        vec![RespValue::Array(vec)]
+        RespValue::Array(vec)
     }
 
     /// Create a XRANGE command
-    pub fn xrange_command(key: &str, start_stream_id: &str, end_stream_id: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn xrange_command(key: &str, start_stream_id: &str, end_stream_id: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("XRANGE".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(start_stream_id.to_string()),
             RespValue::BulkString(end_stream_id.to_string()),
-        ])]
+        ])
     }
 
     /// Create a XREAD command
-    pub fn xread_command(keys: &[&str], start_stream_ids: &[&str]) -> Vec<RespValue> {
+    pub fn xread_command(keys: &[&str], start_stream_ids: &[&str]) -> RespValue {
         let mut vec = vec![
             RespValue::BulkString("XREAD".to_string()),
             RespValue::BulkString("STREAMS".to_string()),
@@ -391,7 +387,7 @@ impl TestUtils {
             vec.push(RespValue::BulkString(stream_id.to_string()));
         }
 
-        vec![RespValue::Array(vec)]
+        RespValue::Array(vec)
     }
 
     /// Create a blocking XREAD command
@@ -399,7 +395,7 @@ impl TestUtils {
         timeout_milliseconds: &str,
         keys: &[&str],
         start_stream_ids: &[&str],
-    ) -> Vec<RespValue> {
+    ) -> RespValue {
         let mut vec = vec![
             RespValue::BulkString("XREAD".to_string()),
             RespValue::BulkString("BLOCK".to_string()),
@@ -415,79 +411,71 @@ impl TestUtils {
             vec.push(RespValue::BulkString(stream_id.to_string()));
         }
 
-        vec![RespValue::Array(vec)]
+        RespValue::Array(vec)
     }
 
     /// Create an INCR command
-    pub fn incr_command(key: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn incr_command(key: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("INCR".to_string()),
             RespValue::BulkString(key.to_string()),
-        ])]
+        ])
     }
 
     /// Create a MULTI command
-    pub fn multi_command() -> Vec<RespValue> {
-        vec![RespValue::Array(vec![RespValue::BulkString(
-            "MULTI".to_string(),
-        )])]
+    pub fn multi_command() -> RespValue {
+        RespValue::Array(vec![RespValue::BulkString("MULTI".to_string())])
     }
 
     /// Create an EXEC command
-    pub fn exec_command() -> Vec<RespValue> {
-        vec![RespValue::Array(vec![RespValue::BulkString(
-            "EXEC".to_string(),
-        )])]
+    pub fn exec_command() -> RespValue {
+        RespValue::Array(vec![RespValue::BulkString("EXEC".to_string())])
     }
 
     /// Create a DISCARD command
-    pub fn discard_command() -> Vec<RespValue> {
-        vec![RespValue::Array(vec![RespValue::BulkString(
-            "DISCARD".to_string(),
-        )])]
+    pub fn discard_command() -> RespValue {
+        RespValue::Array(vec![RespValue::BulkString("DISCARD".to_string())])
     }
 
     /// Create an INFO command
-    pub fn info_command(message: Option<&str>) -> Vec<RespValue> {
+    pub fn info_command(message: Option<&str>) -> RespValue {
         if let Some(info_section) = message {
-            vec![RespValue::Array(vec![
+            RespValue::Array(vec![
                 RespValue::BulkString("INFO".to_string()),
                 RespValue::BulkString(info_section.to_string()),
-            ])]
+            ])
         } else {
-            vec![RespValue::Array(vec![RespValue::BulkString(
-                "INFO".to_string(),
-            )])]
+            RespValue::Array(vec![RespValue::BulkString("INFO".to_string())])
         }
     }
 
     /// Create a REPLCONF command
-    pub fn replconf_command(key: &str, value: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn replconf_command(key: &str, value: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("REPLCONF".to_string()),
             RespValue::BulkString(key.to_string()),
             RespValue::BulkString(value.to_string()),
-        ])]
+        ])
     }
 
     /// Create a PSYNC command
-    pub fn psync_command(replication_id: &str, offset: &str) -> Vec<RespValue> {
-        vec![RespValue::Array(vec![
+    pub fn psync_command(replication_id: &str, offset: &str) -> RespValue {
+        RespValue::Array(vec![
             RespValue::BulkString("PSYNC".to_string()),
             RespValue::BulkString(replication_id.to_string()),
             RespValue::BulkString(offset.to_string()),
-        ])]
+        ])
     }
 
     /// Create an invalid command
-    pub fn invalid_command(args: &[&str]) -> Vec<RespValue> {
+    pub fn invalid_command(args: &[&str]) -> RespValue {
         let mut vec = Vec::new();
 
         for arg in args {
             vec.push(RespValue::BulkString(arg.to_string()));
         }
 
-        vec![RespValue::Array(vec)]
+        RespValue::Array(vec)
     }
 
     /// Generate a unique server address for testing

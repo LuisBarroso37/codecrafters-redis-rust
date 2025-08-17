@@ -63,7 +63,7 @@ pub enum ExtraAction {
 }
 
 pub async fn handle_extra_action(
-    parsed_input: Vec<RespValue>,
+    parsed_input: RespValue,
     client_address: &str,
     writer: Arc<RwLock<OwnedWriteHalf>>,
     server: Arc<RwLock<RedisServer>>,
@@ -116,7 +116,7 @@ pub async fn handle_extra_action(
                 for replica in replicas.values() {
                     let mut replica_guard = replica.write().await;
                     replica_guard
-                        .write_all(parsed_input[0].encode().as_bytes())
+                        .write_all(parsed_input.encode().as_bytes())
                         .await?;
                     replica_guard.flush().await?;
                 }
@@ -167,11 +167,14 @@ impl DispatchResult {
             DispatchResult::ExecuteSingleCommand(command) => {
                 let mut extra_action = None;
 
+                let write_commands = {
+                    let server_guard = server.read().await;
+                    server_guard.write_commands.clone()
+                };
+
                 if command.name == "PSYNC" {
                     extra_action = Some(ExtraAction::SendRdbFile);
-                } else if Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"])
-                    .contains(&command.name.as_str())
-                {
+                } else if write_commands.contains(&command.name.as_str()) {
                     extra_action = Some(ExtraAction::SendWriteCommand);
                 }
 

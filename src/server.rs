@@ -3,7 +3,6 @@ use std::{collections::HashMap, sync::Arc};
 use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -48,6 +47,7 @@ pub struct RedisServer {
     pub repl_id: String,
     pub repl_offset: u64,
     pub replicas: Option<HashMap<String, Arc<RwLock<OwnedWriteHalf>>>>,
+    pub write_commands: Vec<&'static str>,
 }
 
 impl RedisServer {
@@ -97,6 +97,7 @@ impl RedisServer {
             repl_id: Alphanumeric.sample_string(&mut rand::rng(), 40),
             repl_offset: 0,
             replicas,
+            write_commands: Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"]),
         })
     }
 
@@ -150,15 +151,7 @@ impl RedisServer {
 
         loop {
             match listener.accept().await {
-                Ok((mut stream, _addr)) => {
-                    let client_address = match stream.peer_addr() {
-                        Ok(address) => address.to_string(),
-                        Err(e) => {
-                            let _ = stream.write_all(e.to_string().as_bytes()).await;
-                            break;
-                        }
-                    };
-
+                Ok((stream, client_address)) => {
                     let server_clone = Arc::clone(&server);
                     let store_clone = Arc::clone(&store);
                     let state_clone = Arc::clone(&state);
@@ -167,7 +160,7 @@ impl RedisServer {
                         handle_client_connection(
                             stream,
                             server_clone,
-                            client_address,
+                            client_address.to_string(),
                             store_clone,
                             state_clone,
                         )
