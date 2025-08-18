@@ -3,7 +3,11 @@
 //! The REPLCONF command is used during the Redis replication handshake process
 //! to exchange configuration information between master and replica servers.
 
-use crate::{commands::CommandError, resp::RespValue};
+use std::sync::Arc;
+
+use tokio::sync::RwLock;
+
+use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
 
 enum ReplconfConfiguration {
     ListeningPort,
@@ -90,7 +94,10 @@ impl ReplconfArguments {
 /// let result = replconf(vec!["listening-port".to_string(), "6380".to_string()]).await;
 /// // Returns: Ok("+OK\r\n")
 /// ```
-pub async fn replconf(arguments: Vec<String>) -> Result<String, CommandError> {
+pub async fn replconf(
+    server: Arc<RwLock<RedisServer>>,
+    arguments: Vec<String>,
+) -> Result<String, CommandError> {
     let replconf_arguments = ReplconfArguments::parse(arguments)?;
 
     match replconf_arguments.configuration {
@@ -100,11 +107,15 @@ pub async fn replconf(arguments: Vec<String>) -> Result<String, CommandError> {
         ReplconfConfiguration::Capabilities => {
             Ok(RespValue::SimpleString("OK".to_string()).encode())
         }
-        ReplconfConfiguration::GetAck => Ok(RespValue::Array(vec![
-            RespValue::BulkString("REPLCONF".to_string()),
-            RespValue::BulkString("ACK".to_string()),
-            RespValue::BulkString("0".to_string()),
-        ])
-        .encode()),
+        ReplconfConfiguration::GetAck => {
+            let server_guard = server.read().await;
+
+            Ok(RespValue::Array(vec![
+                RespValue::BulkString("REPLCONF".to_string()),
+                RespValue::BulkString("ACK".to_string()),
+                RespValue::BulkString(server_guard.repl_offset.to_string()),
+            ])
+            .encode())
+        }
     }
 }

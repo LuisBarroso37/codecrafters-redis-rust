@@ -188,7 +188,7 @@ impl CommandHandler {
             "XREAD" => xread(client_address, store, state, self.arguments.clone()).await,
             "INCR" => incr(store, self.arguments.clone()).await,
             "INFO" => info(server, self.arguments.clone()).await,
-            "REPLCONF" => replconf(self.arguments.clone()).await,
+            "REPLCONF" => replconf(server, self.arguments.clone()).await,
             "PSYNC" => psync(server, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }

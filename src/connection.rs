@@ -229,6 +229,8 @@ pub async fn handle_master_connection(
                 .await
             {
                 Ok(response) => {
+                    update_replication_offset(Arc::clone(&server), input).await;
+
                     if command_handler.name == "REPLCONF" {
                         if let Err(e) = stream.write_all(response.as_bytes()).await {
                             eprintln!("Error writing to stream: {}", e);
@@ -246,6 +248,11 @@ pub async fn handle_master_connection(
             }
         }
     }
+}
+
+async fn update_replication_offset(server: Arc<RwLock<RedisServer>>, input: RespValue) {
+    let mut server_guard = server.write().await;
+    server_guard.repl_offset += input.encode().as_bytes().len();
 }
 
 /// Writes a response to a TCP stream in a thread-safe manner.

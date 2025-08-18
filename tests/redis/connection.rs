@@ -178,6 +178,77 @@ async fn test_handle_master_connection_processes_commands() {
 }
 
 #[tokio::test]
+async fn test_handle_master_connection_incrementing_offset() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let replica_addr = listener.local_addr().unwrap();
+
+    let env = TestEnv::new_replica_server(6385);
+    let (store, state, server) = env.clone_env();
+
+    // Spawn replica to handle master connection
+    let replica_handle = tokio::spawn(async move {
+        let (mut stream, addr) = listener.accept().await.unwrap();
+        let master_address = addr.to_string();
+
+        handle_master_connection(&master_address, &mut stream, server, store, state).await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Connect as master and send commands
+    let mut master_stream = TcpStream::connect(replica_addr).await.unwrap();
+    let mut buffer = [0; 1024];
+
+    TestUtils::send_replconf_command_and_receive_replica_server(
+        &mut master_stream,
+        &mut buffer,
+        RespValue::Array(vec![
+            RespValue::BulkString("REPLCONF".to_string()),
+            RespValue::BulkString("ACK".to_string()),
+            RespValue::BulkString("0".to_string()),
+        ]),
+    )
+    .await;
+
+    TestUtils::send_replconf_command_and_receive_replica_server(
+        &mut master_stream,
+        &mut buffer,
+        RespValue::Array(vec![
+            RespValue::BulkString("REPLCONF".to_string()),
+            RespValue::BulkString("ACK".to_string()),
+            RespValue::BulkString("37".to_string()),
+        ]),
+    )
+    .await;
+
+    TestUtils::send_command_and_receive_replica_server(
+        &mut master_stream,
+        TestUtils::ping_command(),
+    )
+    .await;
+
+    TestUtils::send_replconf_command_and_receive_replica_server(
+        &mut master_stream,
+        &mut buffer,
+        RespValue::Array(vec![
+            RespValue::BulkString("REPLCONF".to_string()),
+            RespValue::BulkString("ACK".to_string()),
+            RespValue::BulkString("88".to_string()),
+        ]),
+    )
+    .await;
+
+    // Give time for commands to be processed
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Close the connection to terminate the handler
+    drop(master_stream);
+
+    // Wait for handler to complete
+    let _ = timeout(Duration::from_secs(2), replica_handle).await;
+}
+
+#[tokio::test]
 async fn test_handle_master_connection_invalid_commands() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let replica_addr = listener.local_addr().unwrap();

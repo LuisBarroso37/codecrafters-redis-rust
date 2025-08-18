@@ -620,4 +620,28 @@ impl TestUtils {
         client.write_all(command.encode().as_bytes()).await.unwrap();
         client.flush().await.unwrap();
     }
+
+    pub async fn send_replconf_command_and_receive_replica_server(
+        client: &mut TcpStream,
+        buffer: &mut [u8; 1024],
+        expected_response: RespValue,
+    ) {
+        client
+            .write_all(
+                TestUtils::replconf_command("GETACK", "*")
+                    .encode()
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+
+        let result = read_and_parse_resp(client, buffer).await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+
+        assert_eq!(response.len(), 1);
+        assert_eq!(response[0], expected_response);
+    }
 }

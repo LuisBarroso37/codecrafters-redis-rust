@@ -76,7 +76,7 @@ pub struct RedisServer {
     /// Unique replication ID for this server instance (40-character hex string)
     pub repl_id: String,
     /// Current replication offset for tracking synchronized data
-    pub repl_offset: u64,
+    pub repl_offset: usize,
     /// Map of replica connections (only present for master servers)
     pub replicas: Option<HashMap<String, Arc<RwLock<OwnedWriteHalf>>>>,
     /// List of commands that are considered write operations
