@@ -32,6 +32,7 @@ mod type_command;
 mod xadd;
 mod xrange;
 mod xread;
+mod wait;
 
 pub use command_dispatcher::{
     CommandDispatcher, DispatchError, DispatchResult, handle_extra_action,

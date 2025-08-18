@@ -4,24 +4,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     commands::{
-        blpop::{BlpopArguments, blpop},
-        command_error::CommandError,
-        echo::{EchoArguments, echo},
-        get::{GetArguments, get},
-        incr::{IncrArguments, incr},
-        info::{InfoArguments, info},
-        llen::{LlenArguments, llen},
-        lpop::{LpopArguments, lpop},
-        lrange::{LrangeArguments, lrange},
-        ping::{PingArguments, ping},
-        psync::{PsyncArguments, psync},
-        replconf::{ReplconfArguments, replconf},
-        rpush_and_lpush::{PushArrayOperations, lpush, rpush},
-        set::{SetArguments, set},
-        type_command::{TypeArguments, type_command},
-        xadd::{XaddArguments, xadd},
-        xrange::{XrangeArguments, xrange},
-        xread::{XreadArguments, xread},
+        blpop::{blpop, BlpopArguments}, command_error::CommandError, echo::{echo, EchoArguments}, get::{get, GetArguments}, incr::{incr, IncrArguments}, info::{info, InfoArguments}, llen::{llen, LlenArguments}, lpop::{lpop, LpopArguments}, lrange::{lrange, LrangeArguments}, ping::{ping, PingArguments}, psync::{psync, PsyncArguments}, replconf::{replconf, ReplconfArguments}, rpush_and_lpush::{lpush, rpush, PushArrayOperations}, set::{set, SetArguments}, type_command::{type_command, TypeArguments}, wait::{wait, WaitArguments}, xadd::{xadd, XaddArguments}, xrange::{xrange, XrangeArguments}, xread::{xread, XreadArguments}
     },
     key_value_store::KeyValueStore,
     resp::RespValue,
@@ -136,6 +119,7 @@ impl CommandHandler {
             "INFO" => InfoArguments::parse(self.arguments.clone()).err(),
             "REPLCONF" => ReplconfArguments::parse(self.arguments.clone()).err(),
             "PSYNC" => PsyncArguments::parse(self.arguments.clone()).err(),
+            "WAIT" => WaitArguments::parse(self.arguments.clone()).err(),
             _ => Some(CommandError::InvalidCommand),
         }
     }
@@ -190,6 +174,7 @@ impl CommandHandler {
             "INFO" => info(server, self.arguments.clone()).await,
             "REPLCONF" => replconf(server, self.arguments.clone()).await,
             "PSYNC" => psync(server, self.arguments.clone()).await,
+            "WAIT" => wait(self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

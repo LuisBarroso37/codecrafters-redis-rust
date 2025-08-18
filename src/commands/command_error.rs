@@ -86,6 +86,10 @@ pub enum CommandError {
     InvalidPsyncReplicationId,
     #[error("invalid PSYNC offset")]
     InvalidPsyncOffset,
+    #[error("invalid WAIT command")]
+    InvalidWaitCommand,
+    #[error("invalid WAIT command argument")]
+    InvalidWaitCommandArgument,
 }
 
 impl CommandError {
@@ -190,6 +194,12 @@ impl CommandError {
             }
             CommandError::InvalidPsyncOffset => {
                 RespValue::Error("ERR Invalid PSYNC offset".to_string()).encode()
+            }
+            CommandError::InvalidWaitCommand => {
+                RespValue::Error("ERR Invalid WAIT command".to_string()).encode()
+            }
+            CommandError::InvalidWaitCommandArgument => {
+                RespValue::Error("ERR Invalid WAIT command argument".to_string()).encode()
             }
         }
     }
