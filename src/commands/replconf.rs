@@ -5,13 +5,19 @@
 
 use crate::{commands::CommandError, resp::RespValue};
 
+enum ReplconfConfiguration {
+    ListeningPort,
+    Capabilities,
+    GetAck,
+}
+
 /// Represents the parsed arguments for the REPLCONF command.
 ///
 /// REPLCONF is used during replication setup to configure various aspects
 /// of the master-replica connection, such as listening ports and capabilities.
 pub struct ReplconfArguments {
     /// The configuration arguments provided to REPLCONF
-    arguments: Vec<String>,
+    configuration: ReplconfConfiguration,
 }
 
 impl ReplconfArguments {
@@ -29,11 +35,36 @@ impl ReplconfArguments {
     /// * `Ok(ReplconfArguments)` - Successfully parsed arguments
     /// * `Err(CommandError::InvalidReplconfCommand)` - If more than 2 arguments provided
     pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
-        if arguments.len() > 2 {
+        if arguments.len() != 2 {
             return Err(CommandError::InvalidReplconfCommand);
         }
 
-        Ok(Self { arguments })
+        let configuration = match arguments[0].to_lowercase().as_str() {
+            "listening-port" => {
+                let _ = arguments[1]
+                    .parse::<u32>()
+                    .map_err(|_| CommandError::InvalidReplconfCommand)?;
+
+                ReplconfConfiguration::ListeningPort
+            }
+            "capa" => {
+                if arguments[1] != "psync2" {
+                    return Err(CommandError::InvalidReplconfCommand);
+                }
+
+                ReplconfConfiguration::Capabilities
+            }
+            "getack" => {
+                if arguments[1] != "*" {
+                    return Err(CommandError::InvalidReplconfCommand);
+                }
+
+                ReplconfConfiguration::GetAck
+            }
+            _ => return Err(CommandError::InvalidReplconfCommand),
+        };
+
+        Ok(Self { configuration })
     }
 }
 
@@ -60,7 +91,20 @@ impl ReplconfArguments {
 /// // Returns: Ok("+OK\r\n")
 /// ```
 pub async fn replconf(arguments: Vec<String>) -> Result<String, CommandError> {
-    let _ = ReplconfArguments::parse(arguments)?;
+    let replconf_arguments = ReplconfArguments::parse(arguments)?;
 
-    Ok(RespValue::SimpleString("OK".to_string()).encode())
+    match replconf_arguments.configuration {
+        ReplconfConfiguration::ListeningPort => {
+            Ok(RespValue::SimpleString("OK".to_string()).encode())
+        }
+        ReplconfConfiguration::Capabilities => {
+            Ok(RespValue::SimpleString("OK".to_string()).encode())
+        }
+        ReplconfConfiguration::GetAck => Ok(RespValue::Array(vec![
+            RespValue::BulkString("REPLCONF".to_string()),
+            RespValue::BulkString("ACK".to_string()),
+            RespValue::BulkString("0".to_string()),
+        ])
+        .encode()),
+    }
 }

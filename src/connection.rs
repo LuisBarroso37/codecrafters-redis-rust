@@ -228,7 +228,18 @@ pub async fn handle_master_connection(
                 )
                 .await
             {
-                Ok(_) => (),
+                Ok(response) => {
+                    if command_handler.name == "REPLCONF" {
+                        if let Err(e) = stream.write_all(response.as_bytes()).await {
+                            eprintln!("Error writing to stream: {}", e);
+                        }
+                        if let Err(e) = stream.flush().await {
+                            eprintln!("Error flushing stream: {}", e);
+                        }
+
+                        continue;
+                    }
+                }
                 Err(_) => {
                     continue;
                 }
@@ -259,7 +270,7 @@ pub async fn handle_master_connection(
 /// - Writes all bytes in the response buffer
 /// - Flushes the stream to ensure data is transmitted immediately
 /// - Automatically releases the lock when the function completes
-pub async fn write_to_stream(
+async fn write_to_stream(
     writer: Arc<RwLock<OwnedWriteHalf>>,
     response: &[u8],
 ) -> tokio::io::Result<()> {
