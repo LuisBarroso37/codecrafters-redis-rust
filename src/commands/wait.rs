@@ -1,9 +1,11 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use crate::{commands::CommandError, resp::RespValue};
+use tokio::sync::RwLock;
+
+use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
 
 pub struct WaitArguments {
-    pub number_of_replicas: u32,
+    pub number_of_replicas: usize,
     pub timeout_ms: Option<Duration>,
 }
 
@@ -14,7 +16,7 @@ impl WaitArguments {
         }
 
         let number_of_replicas = arguments[0]
-            .parse::<u32>()
+            .parse::<usize>()
             .map_err(|_| CommandError::InvalidWaitCommandArgument)?;
 
         let timeout = arguments[1]
@@ -30,8 +32,13 @@ impl WaitArguments {
     }
 }
 
-pub async fn wait(arguments: Vec<String>) -> Result<String, CommandError> {
+pub async fn wait(server: Arc<RwLock<RedisServer>>, arguments: Vec<String>) -> Result<String, CommandError> {
     let wait_args = WaitArguments::parse(arguments)?;
 
-    Ok(RespValue::Integer(0).encode())
+    let server_guard = server.read().await;
+    let Some(ref replicas) = server_guard.replicas else {
+        return Err(CommandError::InvalidWaitCommand);
+    };
+
+    Ok(RespValue::Integer(replicas.len() as i64).encode())
 }

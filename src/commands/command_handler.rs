@@ -174,7 +174,7 @@ impl CommandHandler {
             "INFO" => info(server, self.arguments.clone()).await,
             "REPLCONF" => replconf(server, self.arguments.clone()).await,
             "PSYNC" => psync(server, self.arguments.clone()).await,
-            "WAIT" => wait(self.arguments.clone()).await,
+            "WAIT" => wait(server, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }
