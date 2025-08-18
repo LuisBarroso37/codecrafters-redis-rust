@@ -1,9 +1,17 @@
+//! Server state management for blocking operations and client subscriptions.
+//!
+//! This module provides the infrastructure for managing blocking Redis operations
+//! like BLPOP and XREAD, which can wait for data to become available. It handles
+//! client subscriptions, notifications, and the coordination between commands that
+//! produce data and commands that consume it.
+
 use std::collections::{HashMap, VecDeque};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::commands::{CommandError, CommandHandler, is_xread_stream_id_after, validate_stream_id};
 
+/// Errors that can occur during state management operations.
 #[derive(Error, Debug, PartialEq)]
 pub enum StateError {
     #[error("Transaction already started")]
@@ -13,6 +21,11 @@ pub enum StateError {
 }
 
 impl StateError {
+    /// Converts the error to a string representation.
+    ///
+    /// # Returns
+    ///
+    /// A string describing the error condition.
     pub fn as_string(&self) -> String {
         match self {
             StateError::TransactionAlreadyStarted => "Transaction already started".to_string(),

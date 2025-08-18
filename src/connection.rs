@@ -1,3 +1,9 @@
+//! Connection handling for Redis server.
+//!
+//! This module provides functions for managing TCP connections between clients and the server,
+//! as well as connections between master and replica servers in a Redis replication setup.
+//! It handles command processing, response writing, and connection lifecycle management.
+
 use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
@@ -17,6 +23,32 @@ use crate::{
     state::State,
 };
 
+/// Handles a client connection for the Redis server.
+///
+/// This function manages the complete lifecycle of a client connection, including:
+/// - Reading and parsing RESP commands from the client
+/// - Validating command permissions based on server role (master/replica)
+/// - Dispatching commands to appropriate handlers
+/// - Writing responses back to the client
+/// - Managing replica registrations for master servers
+///
+/// The function runs in a loop until the connection is closed by the client
+/// or an unrecoverable error occurs.
+///
+/// # Arguments
+///
+/// * `stream` - The TCP stream representing the client connection
+/// * `server` - A thread-safe reference to the Redis server configuration
+/// * `client_address` - String representation of the client's address for logging and identification
+/// * `store` - A thread-safe reference to the key-value store
+/// * `state` - A thread-safe reference to the server state for blocking operations
+///
+/// # Behavior
+///
+/// - For master servers: All commands are allowed, and replica connections are tracked
+/// - For replica servers: Write commands are rejected with an error response
+/// - Connection errors and command parsing errors are handled gracefully
+/// - The function terminates when the client closes the connection
 pub async fn handle_client_connection(
     stream: TcpStream,
     server: Arc<RwLock<RedisServer>>,
@@ -131,6 +163,31 @@ pub async fn handle_client_connection(
     }
 }
 
+/// Handles commands received from a master server on a replica.
+///
+/// This function is used by replica servers to process commands sent from their
+/// master server during replication. Unlike client connections, this function:
+/// - Does not send responses back to the master (replication is one-way)
+/// - Continues processing even if individual commands fail
+/// - Applies all commands received from the master to maintain data consistency
+///
+/// The function runs in a loop until the master connection is closed or an
+/// unrecoverable network error occurs.
+///
+/// # Arguments
+///
+/// * `master_address` - String representation of the master server's address
+/// * `stream` - Mutable reference to the TCP stream connected to the master
+/// * `server` - A thread-safe reference to the Redis server configuration
+/// * `store` - A thread-safe reference to the key-value store to update
+/// * `state` - A thread-safe reference to the server state
+///
+/// # Behavior
+///
+/// - Commands are processed silently without sending responses
+/// - Command parsing errors are ignored to maintain connection stability
+/// - The function terminates when the master closes the connection
+/// - All successful commands update the replica's data store
 pub async fn handle_master_connection(
     master_address: &str,
     stream: &mut TcpStream,
@@ -148,6 +205,7 @@ pub async fn handle_master_connection(
                     break;
                 }
                 _ => {
+                    eprintln!("Error reading command: {}", e);
                     continue;
                 }
             },
@@ -179,6 +237,28 @@ pub async fn handle_master_connection(
     }
 }
 
+/// Writes a response to a TCP stream in a thread-safe manner.
+///
+/// This function handles writing data to a shared TCP stream writer, ensuring
+/// that concurrent writes are properly synchronized. It acquires an exclusive
+/// lock on the writer before performing the write and flush operations.
+///
+/// # Arguments
+///
+/// * `writer` - A thread-safe reference to the owned write half of the TCP stream
+/// * `response` - The byte slice containing the data to write to the stream
+///
+/// # Returns
+///
+/// * `Ok(())` - If the write and flush operations complete successfully
+/// * `Err(tokio::io::Error)` - If any I/O error occurs during writing or flushing
+///
+/// # Behavior
+///
+/// - Acquires an exclusive lock on the writer to prevent concurrent access
+/// - Writes all bytes in the response buffer
+/// - Flushes the stream to ensure data is transmitted immediately
+/// - Automatically releases the lock when the function completes
 pub async fn write_to_stream(
     writer: Arc<RwLock<OwnedWriteHalf>>,
     response: &[u8],
@@ -190,6 +270,26 @@ pub async fn write_to_stream(
     Ok(())
 }
 
+/// Determines whether write commands should be forbidden for the current server role.
+///
+/// This function implements the Redis replication rule that replica servers should
+/// not accept write commands from clients, only from their master server. It checks
+/// the server's current role and whether the given command is classified as a write operation.
+///
+/// # Arguments
+///
+/// * `server` - A thread-safe reference to the Redis server configuration
+/// * `command_handler` - The command handler containing the command name to check
+///
+/// # Returns
+///
+/// * `true` - If the server is a replica and the command is a write command
+/// * `false` - If the server is a master, or if the command is not a write command
+///
+/// # Write Commands
+///
+/// The following commands are considered write operations:
+/// - SET, RPUSH, LPUSH, INCR, LPOP, BLPOP, XADD
 async fn are_write_commands_forbidden(
     server: Arc<RwLock<RedisServer>>,
     command_handler: &CommandHandler,
@@ -203,4 +303,115 @@ async fn are_write_commands_forbidden(
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::{RedisRole, RedisServer};
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_are_write_commands_forbidden() {
+        let test_cases = [
+            (
+                RedisRole::Master,
+                "SET",
+                vec!["SET", "RPUSH", "LPUSH"],
+                false,
+                "master allows write commands",
+            ),
+            (
+                RedisRole::Master,
+                "GET",
+                vec!["SET", "RPUSH", "LPUSH"],
+                false,
+                "master allows read commands",
+            ),
+            (
+                RedisRole::Master,
+                "UNKNOWN",
+                vec!["SET", "RPUSH", "LPUSH"],
+                false,
+                "master allows unknown commands",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "SET",
+                vec!["SET", "RPUSH", "LPUSH"],
+                true,
+                "replica forbids SET command",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "RPUSH",
+                vec!["SET", "RPUSH", "LPUSH"],
+                true,
+                "replica forbids RPUSH command",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "LPUSH",
+                vec!["SET", "RPUSH", "LPUSH"],
+                true,
+                "replica forbids LPUSH command",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "GET",
+                vec!["SET", "RPUSH", "LPUSH"],
+                false,
+                "replica allows read commands",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "UNKNOWN",
+                vec!["SET", "RPUSH", "LPUSH"],
+                false,
+                "replica allows unknown commands",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "SET",
+                vec![],
+                false,
+                "replica allows all when write_commands is empty",
+            ),
+            (
+                RedisRole::Replica(("localhost".to_string(), 6380)),
+                "INCR",
+                vec!["SET", "RPUSH", "LPUSH"],
+                false,
+                "replica allows commands not in write_commands list",
+            ),
+        ];
+
+        for (role, command_name, write_commands, expected, description) in test_cases {
+            let replicas = match role {
+                RedisRole::Master => Some(HashMap::new()),
+                RedisRole::Replica(_) => None,
+            };
+
+            let server = Arc::new(RwLock::new(RedisServer {
+                port: 6379,
+                role,
+                repl_id: "test_id".to_string(),
+                repl_offset: 0,
+                replicas,
+                write_commands,
+            }));
+
+            let command_handler = CommandHandler {
+                name: command_name.to_string(),
+                arguments: vec!["arg1".to_string(), "arg2".to_string()],
+            };
+
+            let result = are_write_commands_forbidden(server, &command_handler).await;
+            assert_eq!(
+                result, expected,
+                "Failed for {}: command '{}'",
+                description, command_name
+            );
+        }
+    }
 }

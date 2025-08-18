@@ -1,3 +1,9 @@
+//! Redis Serialization Protocol (RESP) implementation.
+//!
+//! This module provides encoding and decoding functionality for the Redis Serialization Protocol,
+//! which is used for communication between Redis clients and servers. It supports all standard
+//! RESP data types including strings, integers, arrays, errors, and null values.
+
 use std::slice::Iter;
 
 use thiserror::Error;
@@ -112,6 +118,7 @@ impl RespValue {
         match prefix {
             '$' => Self::decode_bulk_string(content, rest_of_data),
             '+' => Ok(RespValue::SimpleString(content.to_string())),
+            '-' => Ok(RespValue::Error(content.to_string())),
             ':' => {
                 let integer = content
                     .parse::<i64>()

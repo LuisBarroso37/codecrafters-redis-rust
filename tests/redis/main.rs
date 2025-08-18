@@ -1,4 +1,5 @@
 mod commands;
-mod integration_tests;
+mod connection;
+mod input;
 mod server;
 mod test_utils;

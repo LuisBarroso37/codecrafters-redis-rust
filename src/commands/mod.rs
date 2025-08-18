@@ -1,3 +1,16 @@
+//! Redis command implementations.
+//!
+//! This module contains the implementation of all Redis commands supported by the server.
+//! Each command is implemented in its own module with consistent patterns for:
+//!
+//! - Argument parsing and validation
+//! - Command execution logic  
+//! - Response formatting
+//! - Error handling
+//!
+//! The module also provides the command dispatcher system that routes parsed commands
+//! to their appropriate handlers and manages the execution pipeline.
+
 mod blpop;
 mod command_dispatcher;
 mod command_error;

@@ -2,12 +2,15 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use codecrafters_redis::{
     commands::{CommandDispatcher, CommandError, CommandHandler, DispatchError, DispatchResult},
+    input::read_and_parse_resp,
     key_value_store::KeyValueStore,
     resp::RespValue,
     server::{RedisRole, RedisServer},
     state::State,
 };
+use tokio::io::AsyncWriteExt;
 use tokio::{
+    net::TcpStream,
     sync::{Mutex, RwLock},
     time::timeout,
 };
@@ -34,7 +37,7 @@ impl TestEnv {
                 repl_id: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
                 repl_offset: 0,
                 replicas: Some(HashMap::new()),
-                write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"],
+                write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"],
             })),
         }
     }
@@ -50,7 +53,7 @@ impl TestEnv {
                 repl_id: "c673350b6868f3661bd1231ad1b5389310d0a201".to_string(),
                 repl_offset: 0,
                 replicas: None,
-                write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "XADD"],
+                write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"],
             })),
         }
     }
@@ -65,7 +68,7 @@ impl TestEnv {
     }
 
     /// Clone the environment for use in async tasks
-    fn clone_env(
+    pub fn clone_env(
         &self,
     ) -> (
         Arc<Mutex<KeyValueStore>>,
@@ -142,7 +145,7 @@ impl TestEnv {
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         match result.unwrap() {
             DispatchResult::ImmediateResponse(resp) => {
@@ -163,7 +166,7 @@ impl TestEnv {
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         match result.unwrap() {
             DispatchResult::ExecuteTransactionCommands(commands) => {
@@ -199,7 +202,7 @@ impl TestEnv {
         let result = self
             .exec_transaction_command(command_handler, client_address)
             .await;
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         let response = result
             .unwrap()
@@ -590,5 +593,31 @@ impl TestUtils {
             .filter_map(|r| r.as_ref().ok())
             .filter(|s| s.contains(substring))
             .collect()
+    }
+
+    pub async fn send_command_and_receive_master_server(
+        client: &mut TcpStream,
+        buffer: &mut [u8; 1024],
+        command: RespValue,
+        expected_response: RespValue,
+    ) {
+        client.write_all(command.encode().as_bytes()).await.unwrap();
+        client.flush().await.unwrap();
+
+        let result = read_and_parse_resp(client, buffer).await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+
+        assert_eq!(response.len(), 1);
+        assert_eq!(response[0], expected_response);
+    }
+
+    pub async fn send_command_and_receive_replica_server(
+        client: &mut TcpStream,
+        command: RespValue,
+    ) {
+        client.write_all(command.encode().as_bytes()).await.unwrap();
+        client.flush().await.unwrap();
     }
 }

@@ -1,7 +1,21 @@
+//! Error types for Redis command processing.
+//!
+//! This module defines all possible errors that can occur during Redis command
+//! parsing, validation, and execution. Each error type corresponds to specific
+//! failure conditions and includes appropriate error messages that can be
+//! returned to Redis clients.
+
 use thiserror::Error;
 
 use crate::resp::RespValue;
 
+/// Comprehensive error type for all Redis command processing failures.
+///
+/// This enum covers all possible error conditions that can occur during:
+/// - Command parsing and argument validation  
+/// - Command execution and data access
+/// - Type checking and data structure operations
+/// - Stream and blocking operation failures
 #[derive(Error, Debug, PartialEq)]
 pub enum CommandError {
     #[error("invalid command")]
