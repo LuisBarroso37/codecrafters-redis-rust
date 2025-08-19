@@ -229,7 +229,7 @@ pub async fn handle_master_connection(
                 .await
             {
                 Ok(response) => {
-                    update_replication_offset(Arc::clone(&server), input).await;
+                    update_replica_offset(Arc::clone(&server), input).await;
 
                     if command_handler.name == "REPLCONF" {
                         if let Err(e) = stream.write_all(response.as_bytes()).await {
@@ -250,7 +250,7 @@ pub async fn handle_master_connection(
     }
 }
 
-async fn update_replication_offset(server: Arc<RwLock<RedisServer>>, input: RespValue) {
+async fn update_replica_offset(server: Arc<RwLock<RedisServer>>, input: RespValue) {
     let mut server_guard = server.write().await;
     server_guard.repl_offset += input.encode().as_bytes().len();
 }

@@ -90,6 +90,8 @@ pub enum CommandError {
     InvalidWaitCommand,
     #[error("invalid WAIT command argument")]
     InvalidWaitCommandArgument,
+    #[error("invalid WAIT command for replica")]
+    InvalidWaitCommandForReplica,
 }
 
 impl CommandError {
@@ -200,6 +202,9 @@ impl CommandError {
             }
             CommandError::InvalidWaitCommandArgument => {
                 RespValue::Error("ERR Invalid WAIT command argument".to_string()).encode()
+            }
+            CommandError::InvalidWaitCommandForReplica => {
+                RespValue::Error("ERR Invalid WAIT command for replica".to_string()).encode()
             }
         }
     }

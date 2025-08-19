@@ -29,10 +29,10 @@ mod rpush_and_lpush;
 mod set;
 mod stream_utils;
 mod type_command;
+mod wait;
 mod xadd;
 mod xrange;
 mod xread;
-mod wait;
 
 pub use command_dispatcher::{
     CommandDispatcher, DispatchError, DispatchResult, handle_extra_action,

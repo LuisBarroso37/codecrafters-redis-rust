@@ -9,6 +9,7 @@ use tokio::{
     sync::{Mutex, RwLock},
 };
 
+use crate::server::RedisRole;
 use crate::{
     commands::{CommandError, CommandHandler},
     key_value_store::KeyValueStore,
@@ -87,7 +88,7 @@ pub async fn handle_extra_action(
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(0) => break, // EOF
+                    Ok(0) => break,
                     Ok(n) => {
                         writer_guard.write_all(&buffer[..n]).await?;
                     }
@@ -99,26 +100,31 @@ pub async fn handle_extra_action(
             }
 
             writer_guard.flush().await?;
-            drop(writer_guard); // Release the lock
+            drop(writer_guard);
 
             // Add replica to replication list after successful RDB streaming
             let mut server_guard = server.write().await;
             if let Some(replicas) = &mut server_guard.replicas {
-                replicas.insert(client_address.to_string(), writer);
+                replicas.insert(
+                    client_address.to_string(),
+                    crate::server::Replica { writer, offset: 0 },
+                );
             }
 
             Ok(())
         }
         ExtraAction::SendWriteCommand => {
+            update_master_offset(Arc::clone(&server), &parsed_input).await;
+
             let server_guard = server.read().await;
 
             if let Some(ref replicas) = server_guard.replicas {
                 for replica in replicas.values() {
-                    let mut replica_guard = replica.write().await;
-                    replica_guard
+                    let mut replica_writer_guard = replica.writer.write().await;
+                    replica_writer_guard
                         .write_all(parsed_input.encode().as_bytes())
                         .await?;
-                    replica_guard.flush().await?;
+                    replica_writer_guard.flush().await?;
                 }
             }
 
@@ -320,5 +326,13 @@ impl CommandDispatcher {
                 ))
             }
         }
+    }
+}
+
+async fn update_master_offset(server: Arc<RwLock<RedisServer>>, input: &RespValue) {
+    let mut server_guard = server.write().await;
+
+    if let RedisRole::Master = server_guard.role {
+        server_guard.repl_offset += input.encode().as_bytes().len();
     }
 }

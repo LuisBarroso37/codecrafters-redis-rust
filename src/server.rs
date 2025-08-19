@@ -62,6 +62,12 @@ impl RedisRole {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Replica {
+    pub writer: Arc<RwLock<OwnedWriteHalf>>,
+    pub offset: usize,
+}
+
 /// Configuration and state for a Redis server instance.
 ///
 /// Contains all the necessary configuration and runtime state for a Redis server,
@@ -78,7 +84,7 @@ pub struct RedisServer {
     /// Current replication offset for tracking synchronized data
     pub repl_offset: usize,
     /// Map of replica connections (only present for master servers)
-    pub replicas: Option<HashMap<String, Arc<RwLock<OwnedWriteHalf>>>>,
+    pub replicas: Option<HashMap<String, Replica>>,
     /// List of commands that are considered write operations
     pub write_commands: Vec<&'static str>,
 }

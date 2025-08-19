@@ -470,6 +470,15 @@ impl TestUtils {
         ])
     }
 
+    /// Create a WAIT command
+    pub fn wait_command(number_of_replicas: u32, timeout_ms: u32) -> RespValue {
+        RespValue::Array(vec![
+            RespValue::BulkString("WAIT".to_string()),
+            RespValue::BulkString(number_of_replicas.to_string()),
+            RespValue::BulkString(timeout_ms.to_string()),
+        ])
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> RespValue {
         let mut vec = Vec::new();
@@ -643,5 +652,33 @@ impl TestUtils {
 
         assert_eq!(response.len(), 1);
         assert_eq!(response[0], expected_response);
+    }
+
+    pub async fn run_master_server(port: u32) {
+        let master_args = vec![
+            "redis-server".to_string(),
+            "--port".to_string(),
+            port.to_string(),
+        ];
+        let master_server = RedisServer::new(master_args).unwrap();
+
+        tokio::spawn(async move {
+            master_server.run().await;
+        });
+    }
+
+    pub async fn run_replica_server(port: u32, master_port: u32) {
+        let replica_args = vec![
+            "redis-server".to_string(),
+            "--port".to_string(),
+            port.to_string(),
+            "--replicaof".to_string(),
+            format!("127.0.0.1 {}", master_port),
+        ];
+        let replica_server = RedisServer::new(replica_args).unwrap();
+
+        tokio::spawn(async move {
+            replica_server.run().await;
+        });
     }
 }

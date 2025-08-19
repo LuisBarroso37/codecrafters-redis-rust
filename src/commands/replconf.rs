@@ -13,6 +13,7 @@ enum ReplconfConfiguration {
     ListeningPort,
     Capabilities,
     GetAck,
+    Ack(usize),
 }
 
 /// Represents the parsed arguments for the REPLCONF command.
@@ -45,7 +46,7 @@ impl ReplconfArguments {
 
         let configuration = match arguments[0].to_lowercase().as_str() {
             "listening-port" => {
-                let _ = arguments[1]
+                arguments[1]
                     .parse::<u32>()
                     .map_err(|_| CommandError::InvalidReplconfCommand)?;
 
@@ -65,6 +66,14 @@ impl ReplconfArguments {
 
                 ReplconfConfiguration::GetAck
             }
+            "ack" => {
+                let offset = arguments[1]
+                    .parse::<usize>()
+                    .map_err(|_| CommandError::InvalidReplconfCommand)?;
+
+                ReplconfConfiguration::Ack(offset)
+            }
+
             _ => return Err(CommandError::InvalidReplconfCommand),
         };
 
@@ -95,6 +104,7 @@ impl ReplconfArguments {
 /// // Returns: Ok("+OK\r\n")
 /// ```
 pub async fn replconf(
+    client_address: &str,
     server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
 ) -> Result<String, CommandError> {
@@ -116,6 +126,18 @@ pub async fn replconf(
                 RespValue::BulkString(server_guard.repl_offset.to_string()),
             ])
             .encode())
+        }
+        ReplconfConfiguration::Ack(offset) => {
+            let mut server_guard = server.write().await;
+
+            if let Some(ref mut replicas) = server_guard.replicas {
+                if let Some(replica) = replicas.get_mut(client_address) {
+                    replica.offset = offset;
+                }
+            }
+
+            // Return empty string for Ack, caller should not send a response
+            Ok(String::new())
         }
     }
 }
