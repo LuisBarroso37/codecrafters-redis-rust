@@ -39,44 +39,14 @@ pub enum CommandResult {
     Batch(Vec<CommandHandler>),
 }
 
-/// Represents a parsed Redis command with its name and arguments.
-///
-/// This struct is responsible for parsing RESP arrays into Redis commands
-/// and dispatching them to the appropriate command handlers.
 #[derive(Debug, PartialEq, Clone)]
 pub struct CommandHandler {
-    /// The name of the Redis command (e.g., "GET", "SET", "PING")
     pub name: String,
-    /// The arguments passed to the command
     pub arguments: Vec<String>,
     pub input: RespValue,
 }
 
 impl CommandHandler {
-    /// Creates a new CommandHandler from a RESP array.
-    ///
-    /// Parses a RESP array containing a Redis command and its arguments.
-    /// The first element should be the command name, and subsequent elements
-    /// should be the command arguments.
-    ///
-    /// # Arguments
-    ///
-    /// * `input` - A vector containing exactly one RESP array value
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(CommandHandler)` - Successfully parsed command
-    /// * `Err(CommandError)` - If input is invalid or cannot be parsed
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let resp_array = vec![RespValue::Array(vec![
-    ///     RespValue::BulkString("GET".to_string()),
-    ///     RespValue::BulkString("mykey".to_string())
-    /// ])];
-    /// let processor = CommandHandler::new(resp_array)?;
-    /// ```
     pub fn new(input: RespValue) -> Result<Self, CommandError> {
         let RespValue::Array(elements) = &input else {
             return Err(CommandError::InvalidCommand);
@@ -104,33 +74,6 @@ impl CommandHandler {
         })
     }
 
-    /// Validates the arguments for the parsed Redis command.
-    ///
-    /// This method checks whether the arguments provided to the command match the expected
-    /// format for that specific Redis command. It delegates validation to the corresponding
-    /// argument parser for each supported command. If the arguments are invalid, it returns
-    /// the specific `CommandError` produced by the parser. If the arguments are valid, it returns `None`.
-    ///
-    /// # Returns
-    ///
-    /// * `Some(CommandError)` - If the arguments are invalid for the command
-    /// * `None` - If the arguments are valid
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let processor = CommandHandler {
-    ///     name: "GET".to_string(),
-    ///     arguments: vec!["mykey".to_string()],
-    /// };
-    /// assert_eq!(processor.validate_command_arguments().is_none(), true);
-    ///
-    /// let bad_processor = CommandHandler {
-    ///     name: "GET".to_string(),
-    ///     arguments: vec![],
-    /// };
-    /// assert!(bad_processor.validate_command_arguments().is_some());
-    /// ```
     pub fn validate_command_arguments(&self) -> Option<CommandError> {
         match self.name.as_str() {
             "PING" => PingArguments::parse(self.arguments.clone()).err(),
@@ -159,32 +102,6 @@ impl CommandHandler {
         }
     }
 
-    /// Executes the parsed Redis command by dispatching to the appropriate handler.
-    ///
-    /// This method matches the command name against known Redis commands and
-    /// calls the corresponding handler function with the provided arguments.
-    ///
-    /// # Arguments
-    ///
-    /// * `client_address` - The address of the current client server instance
-    /// * `store` - A thread-safe reference to the key-value store
-    /// * `state` - A thread-safe reference to the server state (for blocking operations)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(String)` - RESP-encoded response from the command handler
-    /// * `Err(CommandError::InvalidCommand)` - If the command is not recognized
-    /// * `Err(CommandError)` - Various errors from individual command handlers
-    ///
-    /// # Supported Commands
-    ///
-    /// - Basic: PING, ECHO
-    /// - String: GET, SET, INCR
-    /// - List: RPUSH, LPUSH, LRANGE, LLEN, LPOP, BLPOP
-    /// - Stream: XADD, XRANGE, XREAD
-    /// - Transactions: MULTI, EXEC, DISCARD
-    /// - Utility: TYPE, INFO
-    /// - Replication: REPLCONF, PSYNC, WAIT
     async fn handle_command(
         &self,
         server: Arc<RwLock<RedisServer>>,

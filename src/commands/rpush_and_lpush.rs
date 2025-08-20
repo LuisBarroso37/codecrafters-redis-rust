@@ -9,39 +9,12 @@ use crate::{
     state::State,
 };
 
-/// Represents the parsed arguments for LPUSH and RPUSH commands
 pub struct PushArrayOperations {
-    /// The key name to retrieve from the store
     key: String,
-    /// The values to be pushed to the list
     values: Vec<String>,
 }
 
 impl PushArrayOperations {
-    /// Parses command arguments into a `PushArrayOperations` struct.
-    ///
-    /// Validates that at least a key and one value are provided, returning
-    /// appropriate errors based on the operation type (LPUSH vs RPUSH).
-    ///
-    /// # Arguments
-    ///
-    /// * `arguments` - Vector of command arguments [key, value1, value2, ...]
-    /// * `should_prepend` - Flag indicating if this is for LPUSH (true) or RPUSH (false)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(PushArrayOperations)` - Successfully parsed arguments
-    /// * `Err(CommandError::InvalidLPushCommand)` - If LPUSH has insufficient arguments
-    /// * `Err(CommandError::InvalidRPushCommand)` - If RPUSH has insufficient arguments
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let args = vec!["mylist".to_string(), "value1".to_string(), "value2".to_string()];
-    /// let parsed = PushArrayOperations::parse(args, true)?;
-    /// assert_eq!(parsed.key, "mylist");
-    /// assert_eq!(parsed.values, vec!["value1", "value2"]);
-    /// ```
     pub fn parse(arguments: Vec<String>, should_prepend: bool) -> Result<Self, CommandError> {
         if arguments.len() < 2 {
             return if should_prepend {
@@ -58,31 +31,6 @@ impl PushArrayOperations {
     }
 }
 
-/// Handles the Redis RPUSH command.
-///
-/// Pushes one or more elements to the right (tail) of a list.
-/// If the key doesn't exist, a new list is created.
-/// If the key exists but is not a list, an error is returned.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `state` - A thread-safe reference to the server state (for notifications)
-/// * `arguments` - A vector containing [key, element1, element2, ...]
-///
-/// # Returns
-///
-/// * `Ok(String)` - A RESP-encoded integer representing the new length of the list
-/// * `Err(CommandError::InvalidRPushCommand)` - If fewer than 2 arguments provided
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If key exists but is not a list
-///
-/// # Examples
-///
-/// ```ignore
-/// // RPUSH mylist "hello" "world"
-/// let result = rpush(&mut store, &mut state, vec!["mylist".to_string(), "hello".to_string(), "world".to_string()]).await;
-/// // Returns: ":2\r\n" (new length of the list)
-/// ```
 pub async fn rpush(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
@@ -91,31 +39,6 @@ pub async fn rpush(
     return push_array_operations(store, state, arguments, false).await;
 }
 
-/// Handles the Redis LPUSH command.
-///
-/// Pushes one or more elements to the left (head) of a list.
-/// If the key doesn't exist, a new list is created.
-/// If the key exists but is not a list, an error is returned.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `state` - A thread-safe reference to the server state (for notifications)
-/// * `arguments` - A vector containing [key, element1, element2, ...]
-///
-/// # Returns
-///
-/// * `Ok(String)` - A RESP-encoded integer representing the new length of the list
-/// * `Err(CommandError::InvalidLPushCommand)` - If fewer than 2 arguments provided
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If key exists but is not a list
-///
-/// # Examples
-///
-/// ```ignore
-/// // LPUSH mylist "world" "hello"
-/// let result = lpush(&mut store, &mut state, vec!["mylist".to_string(), "world".to_string(), "hello".to_string()]).await;
-/// // Returns: ":2\r\n" (new length of the list)
-/// ```
 pub async fn lpush(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
@@ -124,22 +47,6 @@ pub async fn lpush(
     return push_array_operations(store, state, arguments, true).await;
 }
 
-/// Internal function that implements the push operations for both LPUSH and RPUSH.
-///
-/// Handles the common logic for adding elements to either end of a list,
-/// including creating new lists, validating data types, and notifying blocked clients.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `state` - A thread-safe reference to the server state (for BLPOP notifications)
-/// * `arguments` - A vector containing [key, element1, element2, ...]
-/// * `should_prepend` - If true, prepends elements (LPUSH); if false, appends elements (RPUSH)
-///
-/// # Returns
-///
-/// * `Ok(String)` - A RESP-encoded integer representing the new length of the list
-/// * `Err(CommandError)` - Various errors based on input validation or data type conflicts
 async fn push_array_operations(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
@@ -196,37 +103,6 @@ async fn push_array_operations(
     ));
 }
 
-/// Adds multiple values to a list in the specified direction.
-///
-/// This helper function handles the actual insertion of values into a `VecDeque`,
-/// either at the front (for LPUSH) or at the back (for RPUSH). Values are added
-/// in the order they appear in the input slice.
-///
-/// # Arguments
-///
-/// * `list` - Mutable reference to the list where values will be added
-/// * `values` - Slice of string values to be added to the list
-/// * `should_prepend` - If true, adds values to the front; if false, adds to the back
-///
-/// # Behavior
-///
-/// - For LPUSH (`should_prepend = true`): Values are added to the front in order,
-///   so the first value in the slice becomes the new head of the list
-/// - For RPUSH (`should_prepend = false`): Values are added to the back in order,
-///   so the last value in the slice becomes the new tail of the list
-///
-/// # Examples
-///
-/// ```ignore
-/// let mut list = VecDeque::new();
-/// let values = ["a", "b", "c"];
-///
-/// // LPUSH behavior: list becomes ["c", "b", "a"]
-/// add_values_to_list(&mut list, &values, true);
-///
-/// // RPUSH behavior: list becomes ["a", "b", "c"]
-/// add_values_to_list(&mut list, &values, false);
-/// ```
 fn add_values_to_list(list: &mut VecDeque<String>, values: &[String], should_prepend: bool) {
     for value in values {
         if should_prepend {

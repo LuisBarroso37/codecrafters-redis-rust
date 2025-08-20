@@ -9,64 +9,12 @@ use crate::{
     state::{BlpopSubscriber, State},
 };
 
-/// Represents the parsed arguments for BLPOP command
-///
-/// Contains the key name and blocking duration for the BLPOP operation.
-/// The BLPOP command blocks until an element is available or timeout expires.
 pub struct BlpopArguments {
-    /// The key name of the list to block and pop from
     key: String,
-    /// Blocking duration in seconds (0.0 means block indefinitely)
     block_duration_secs: f64,
 }
 
 impl BlpopArguments {
-    /// Parses command arguments into a BlpopArguments structure.
-    ///
-    /// This function validates and processes the arguments for the BLPOP command,
-    /// which blocks until an element becomes available in the specified list
-    /// or until the timeout expires.
-    ///
-    /// # Arguments
-    ///
-    /// * `arguments` - A vector of strings representing the command arguments:
-    ///   - Format: `[key, timeout_seconds]`
-    ///   - `key`: The name of the list to pop from
-    ///   - `timeout_seconds`: Timeout in seconds (can be fractional, 0 means infinite)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(BlpopArguments)` - Successfully parsed arguments containing:
-    ///   - `key`: The name of the list key to pop from
-    ///   - `block_duration_secs`: Timeout duration (0.0 for infinite blocking)
-    /// * `Err(CommandError::InvalidBLPopCommand)` - If the number of arguments is not exactly 2
-    /// * `Err(CommandError::InvalidBLPopCommandArgument)` - If timeout is not a valid number
-    ///
-    /// # Redis Command Format
-    ///
-    /// The Redis BLPOP command has the format: `BLPOP key timeout`
-    /// - `key`: The name of the list to pop from
-    /// - `timeout`: Timeout in seconds (0 means block indefinitely)
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Block for up to 5 seconds
-    /// let result = BlpopArguments::parse(vec!["mylist".to_string(), "5.0".to_string()]);
-    /// // Returns: Ok(BlpopArguments { key: "mylist", block_duration_secs: 5.0 })
-    ///
-    /// // Block indefinitely
-    /// let result = BlpopArguments::parse(vec!["mylist".to_string(), "0".to_string()]);
-    /// // Returns: Ok(BlpopArguments { key: "mylist", block_duration_secs: 0.0 })
-    ///
-    /// // Invalid: wrong number of arguments
-    /// let result = BlpopArguments::parse(vec!["mylist".to_string()]);
-    /// // Returns: Err(CommandError::InvalidBLPopCommand)
-    ///
-    /// // Invalid: timeout is not a number
-    /// let result = BlpopArguments::parse(vec!["mylist".to_string(), "invalid".to_string()]);
-    /// // Returns: Err(CommandError::InvalidBLPopCommandArgument)
-    /// ```
     pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 2 {
             return Err(CommandError::InvalidBLPopCommand);
@@ -83,36 +31,6 @@ impl BlpopArguments {
     }
 }
 
-/// Handles the Redis BLPOP command.
-///
-/// Blocking version of LPOP that waits for an element to become available.
-/// If the list is empty or doesn't exist, the command blocks until:
-/// 1. An element is pushed to the list by another client
-/// 2. The timeout expires
-///
-/// # Arguments
-///
-/// * `client_address` - The address of the current client (for subscriber identification)
-/// * `store` - A thread-safe reference to the key-value store
-/// * `state` - A thread-safe reference to the server state (for blocking operations)
-/// * `arguments` - A vector containing exactly 2 elements: [key, timeout_seconds]
-///
-/// # Returns
-///
-/// * `Ok(String)` - A RESP-encoded response:
-///   - Array with [key, value] if an element is available
-///   - Null if timeout expires without finding an element
-/// * `Err(CommandError::InvalidBLPopCommand)` - If the number of arguments is not exactly 2
-/// * `Err(CommandError::InvalidBLPopCommandArgument)` - If timeout is not a valid number
-///
-/// # Examples
-///
-/// ```ignore
-/// // BLPOP mylist 5  (block for up to 5 seconds)
-/// let result = blpop("127.0.0.1:6379".to_string(), &mut store, &mut state,
-///                   vec!["mylist".to_string(), "5".to_string()]).await;
-/// // Returns: "*2\r\n$6\r\nmylist\r\n$5\r\nvalue\r\n" (key-value pair) or "$-1\r\n" (timeout)
-/// ```
 pub async fn blpop(
     client_address: &str,
     store: Arc<Mutex<KeyValueStore>>,
@@ -154,21 +72,6 @@ pub async fn blpop(
     }
 }
 
-/// Removes and returns the first element from a list stored at the given key.
-///
-/// This is a helper function for BLPOP that atomically removes the leftmost
-/// element from a list. If the key doesn't exist, doesn't contain a list,
-/// or the list is empty, returns None.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `key` - The key name of the list to pop from
-///
-/// # Returns
-///
-/// * `Some(String)` - The leftmost element if the list exists and has elements
-/// * `None` - If the key doesn't exist, is not a list, or the list is empty
 async fn remove_first_element_from_list(
     store: Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -186,18 +89,6 @@ async fn remove_first_element_from_list(
     }
 }
 
-/// Adds a BLPOP subscriber to the server state for the given key.
-///
-/// This function registers a client that is waiting for data to be pushed
-/// to a specific list key. When an element is added to the list, the subscriber
-/// will be notified through the oneshot channel.
-///
-/// # Arguments
-///
-/// * `state` - A thread-safe reference to the server state
-/// * `key` - The key name the subscriber is waiting for
-/// * `client_address` - The address of the client's server (for identification)
-/// * `sender` - Oneshot sender to notify the subscriber when data becomes available
 async fn add_subscriber(
     state: Arc<Mutex<State>>,
     key: String,
@@ -213,43 +104,11 @@ async fn add_subscriber(
     state_guard.add_blpop_subscriber(key, subscriber);
 }
 
-/// Removes a BLPOP subscriber from the server state for the given key.
-///
-/// This function unregisters a client that was waiting for data to be pushed
-/// to a specific list key. This is called when the blocking operation times out
-/// or when data is successfully delivered to the subscriber.
-///
-/// # Arguments
-///
-/// * `state` - A thread-safe reference to the server state
-/// * `key` - The key name the subscriber was waiting for
-/// * `client_address` - The address of the client's server (for identification)
 async fn remove_subscriber(state: Arc<Mutex<State>>, key: &str, client_address: &str) {
     let mut state_guard = state.lock().await;
     state_guard.remove_blpop_subscriber(key, &client_address);
 }
 
-/// Waits for data to become available on a oneshot channel with optional timeout.
-///
-/// This function handles the blocking behavior of BLPOP by waiting for a notification
-/// that data has become available. It supports both infinite blocking (when duration is 0.0)
-/// and timeout-based blocking.
-///
-/// # Arguments
-///
-/// * `receiver` - Oneshot receiver to wait for notification
-/// * `blocking_duration_secs` - Timeout in seconds (0.0 means block indefinitely)
-///
-/// # Returns
-///
-/// * `Some(bool)` - If notification is received before timeout
-/// * `None` - If the operation times out or the sender is dropped
-///
-/// # Behavior
-///
-/// - If `blocking_duration_secs` is 0.0, blocks indefinitely until notification
-/// - If `blocking_duration_secs` > 0.0, blocks for the specified duration
-/// - Returns None if timeout expires or channel is closed
 async fn wait_for_data(
     receiver: &mut oneshot::Receiver<bool>,
     blocking_duration_secs: f64,

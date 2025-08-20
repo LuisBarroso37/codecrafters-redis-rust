@@ -13,41 +13,13 @@ use crate::{
     state::State,
 };
 
-/// Represents the parsed arguments for XADD command
 pub struct XaddArguments {
-    /// The Redis stream key where the entry will be added
     key: String,
-    /// The stream ID for the new entry ("*" for auto-generation or "timestamp-sequence")
     stream_id: String,
-    /// Field-value pairs that make up the stream entry content
     entries: BTreeMap<String, String>,
 }
 
 impl XaddArguments {
-    /// Parses command arguments into an `XaddArguments` struct.
-    ///
-    /// Validates that the minimum required arguments are provided and that
-    /// field-value pairs are properly matched (even number of field/value arguments).
-    ///
-    /// # Arguments
-    ///
-    /// * `arguments` - Vector of command arguments [key, stream_id, field1, value1, field2, value2, ...]
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(XaddArguments)` - Successfully parsed arguments
-    /// * `Err(CommandError::InvalidXAddCommand)` - If fewer than 4 arguments provided or
-    ///   field-value pairs don't match (odd number of field/value arguments)
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let args = vec!["mystream".to_string(), "*".to_string(), "temp".to_string(), "25".to_string()];
-    /// let parsed = XaddArguments::parse(args)?;
-    /// assert_eq!(parsed.key, "mystream");
-    /// assert_eq!(parsed.stream_id, "*");
-    /// assert_eq!(parsed.entries.get("temp"), Some(&"25".to_string()));
-    /// ```
     pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() < 4 {
             return Err(CommandError::InvalidXAddCommand);
@@ -68,36 +40,6 @@ impl XaddArguments {
     }
 }
 
-/// Handles the Redis XADD command.
-///
-/// Adds a new entry to a Redis stream with the specified ID and field-value pairs.
-/// If the stream doesn't exist, it creates a new one. The stream ID must be greater
-/// than the last ID in the stream to maintain ordering.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `state` - A thread-safe reference to the server state (for XREAD notifications)
-/// * `arguments` - A vector containing: [key, stream_id, field1, value1, field2, value2, ...]
-///
-/// # Returns
-///
-/// * `Ok(String)` - A RESP-encoded bulk string containing the generated stream ID
-/// * `Err(CommandError::InvalidXAddCommand)` - If fewer than 4 arguments provided
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If key exists but is not a stream
-/// * `Err(CommandError::InvalidStreamId)` - If the stream ID is invalid or out of order
-///
-/// # Examples
-///
-/// ```ignore
-/// // XADD mystream * temperature 25 humidity 60
-/// let result = xadd(&mut store, &mut state, vec![
-///     "mystream".to_string(), "*".to_string(),
-///     "temperature".to_string(), "25".to_string(),
-///     "humidity".to_string(), "60".to_string()
-/// ]).await;
-/// // Returns: "$19\r\n1518951480106-0\r\n" (generated stream ID)
-/// ```
 pub async fn xadd(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
@@ -148,22 +90,6 @@ pub async fn xadd(
     ))
 }
 
-/// Validates and generates a stream ID for use in XADD operations.
-///
-/// Handles both explicit stream IDs and auto-generation using "*".
-/// Ensures that the new stream ID is greater than existing IDs in the stream
-/// to maintain chronological ordering.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `key` - The stream key to validate against
-/// * `stream_id` - The stream ID to validate ("*" for auto-generation or "timestamp-sequence")
-///
-/// # Returns
-///
-/// * `Ok(String)` - A validated stream ID in format "timestamp-sequence"
-/// * `Err(String)` - Error message if the stream ID is invalid or out of order
 async fn validate_stream_id_against_store(
     store: Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -198,32 +124,6 @@ async fn validate_stream_id_against_store(
     Ok(stream_id.to_string())
 }
 
-/// Parses a stream ID into its timestamp and sequence components.
-///
-/// Splits a stream ID string on the hyphen delimiter and validates the format.
-/// The timestamp part must be a valid u128, while the sequence part is returned
-/// as a string slice to handle both numeric values and "*" for auto-generation.
-///
-/// # Arguments
-///
-/// * `stream_id` - The stream ID string to parse (format: "timestamp-sequence")
-///
-/// # Returns
-///
-/// * `Ok((u128, &str))` - Parsed timestamp and sequence part as string slice
-/// * `Err(String)` - Error message if the format is invalid or timestamp cannot be parsed
-///
-/// # Examples
-///
-/// ```ignore
-/// let (timestamp, sequence) = parse_stream_id_parts("1234567890-5")?;
-/// assert_eq!(timestamp, 1234567890);
-/// assert_eq!(sequence, "5");
-///
-/// let (timestamp, sequence) = parse_stream_id_parts("1234567890-*")?;
-/// assert_eq!(timestamp, 1234567890);
-/// assert_eq!(sequence, "*");
-/// ```
 fn parse_stream_id_parts(stream_id: &str) -> Result<(u128, &str), String> {
     let parts = stream_id.split('-').collect::<Vec<&str>>();
 
@@ -238,32 +138,6 @@ fn parse_stream_id_parts(stream_id: &str) -> Result<(u128, &str), String> {
     Ok((timestamp, parts[1]))
 }
 
-/// Validates an explicit stream ID against existing entries in the stream.
-///
-/// Ensures that the proposed stream ID is greater than all existing stream IDs
-/// in the target stream to maintain chronological ordering. This is called for
-/// explicit stream IDs (not auto-generated ones).
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `key` - The stream key to validate against
-/// * `timestamp` - The timestamp part of the proposed stream ID
-/// * `sequence` - The sequence part of the proposed stream ID
-///
-/// # Returns
-///
-/// * `Ok(())` - The stream ID is valid and can be used
-/// * `Err(String)` - Error message if the stream ID would violate ordering constraints
-///
-/// # Examples
-///
-/// ```ignore
-/// // Assuming stream has entries up to "1234-5"
-/// validate_against_existing_entries(&store, "mystream", 1234, 6).await?; // OK
-/// validate_against_existing_entries(&store, "mystream", 1235, 0).await?; // OK
-/// validate_against_existing_entries(&store, "mystream", 1234, 4).await; // Error: too small
-/// ```
 async fn validate_against_existing_entries(
     store: Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -282,21 +156,6 @@ async fn validate_against_existing_entries(
     Ok(())
 }
 
-/// Calculates the next sequence number for a stream ID with a given timestamp.
-///
-/// For auto-generated stream IDs, this function determines what sequence number
-/// should be used for a given timestamp, ensuring uniqueness and proper ordering.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `key` - The stream key to check for existing entries
-/// * `timestamp` - The timestamp part of the stream ID
-///
-/// # Returns
-///
-/// * `Ok(u128)` - The next available sequence number for this timestamp
-/// * `Err(String)` - Error message if the stream contains invalid data
 async fn get_next_sequence_for_timestamp(
     store: Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -338,15 +197,6 @@ async fn get_next_sequence_for_timestamp(
     }
 }
 
-/// Gets the current system time as milliseconds since Unix epoch.
-///
-/// Used for generating the timestamp part of auto-generated stream IDs.
-/// This ensures that stream entries are naturally ordered by creation time.
-///
-/// # Returns
-///
-/// * `Ok(u128)` - Current time in milliseconds since Unix epoch
-/// * `Err(SystemTimeError)` - If system time is before Unix epoch (should not happen in practice)
 fn get_timestamp_in_milliseconds() -> Result<u128, SystemTimeError> {
     let current_system_time = SystemTime::now();
     let duration_since_epoch = current_system_time.duration_since(SystemTime::UNIX_EPOCH)?;

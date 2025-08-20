@@ -12,56 +12,12 @@ use crate::{
     state::{State, XreadSubscriber},
 };
 
-/// Represents the parsed arguments for the XREAD command.
-///
-/// The XREAD command can be called with optional blocking duration and multiple key-stream pairs.
-/// Format: `XREAD [BLOCK milliseconds] STREAMS key1 key2 ... id1 id2 ...`
 pub struct XreadArguments {
-    /// Optional blocking duration in milliseconds. None for non-blocking operation.
-    /// A value of 0 means block indefinitely until data is available.
     blocking_duration: Option<u64>,
-    /// Vector of (key, stream_id) pairs where key is the stream name and
-    /// stream_id is the ID from which to start reading (exclusive).
     key_stream_pairs: Vec<(String, String)>,
 }
 
 impl XreadArguments {
-    /// Parses command arguments into structured XreadArguments.
-    ///
-    /// Handles both blocking and non-blocking variants of the XREAD command:
-    /// - `XREAD STREAMS key1 key2 id1 id2` (non-blocking)
-    /// - `XREAD BLOCK milliseconds STREAMS key1 key2 id1 id2` (blocking)
-    ///
-    /// # Arguments
-    ///
-    /// * `arguments` - Raw command arguments from the Redis client
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(XreadArguments)` - Successfully parsed arguments
-    /// * `Err(CommandError::InvalidXReadCommand)` - If less than 3 arguments or uneven key/stream pairs
-    /// * `Err(CommandError::InvalidXReadBlockDuration)` - If block duration is not a valid number
-    /// * `Err(CommandError::InvalidXReadOption)` - If command format is invalid
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Non-blocking: XREAD STREAMS mystream 1234567890-0
-    /// let args = XreadArguments::parse(vec![
-    ///     "STREAMS".to_string(),
-    ///     "mystream".to_string(),
-    ///     "1234567890-0".to_string()
-    /// ])?;
-    ///
-    /// // Blocking: XREAD BLOCK 1000 STREAMS mystream $
-    /// let args = XreadArguments::parse(vec![
-    ///     "BLOCK".to_string(),
-    ///     "1000".to_string(),
-    ///     "STREAMS".to_string(),
-    ///     "mystream".to_string(),
-    ///     "$".to_string()
-    /// ])?;
-    /// ```
     pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() < 3 {
             return Err(CommandError::InvalidXReadCommand);
@@ -108,47 +64,6 @@ impl XreadArguments {
     }
 }
 
-/// Handles the Redis XREAD command.
-///
-/// Reads data from one or more Redis streams, starting from specified stream IDs.
-/// Supports both blocking and non-blocking operations. In blocking mode, the command
-/// waits for new data to arrive if no data is immediately available.
-///
-/// # Arguments
-///
-/// * `client_address` - Unique identifier for the client instance (used for subscriber management)
-/// * `store` - Thread-safe reference to the key-value store
-/// * `state` - Thread-safe reference to server state (manages subscribers for blocking operations)
-/// * `arguments` - Command arguments in the format: [BLOCK ms] STREAMS key1 key2 ... id1 id2 ...
-///
-/// # Returns
-///
-/// * `Ok(String)` - RESP-encoded array of stream entries
-/// * `Err(CommandError::InvalidXReadCommand)` - If command arguments are malformed
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If a key exists but is not a stream
-/// * `Err(CommandError::InvalidStreamId)` - If a stream ID is malformed
-///
-/// # Examples
-///
-/// ```ignore
-/// // Non-blocking read from multiple streams
-/// let result = xread(
-///     "server-1".to_string(),
-///     &mut store,
-///     &mut state,
-///     vec!["STREAMS".to_string(), "stream1".to_string(), "stream2".to_string(),
-///          "1234-0".to_string(), "5678-0".to_string()]
-/// ).await?;
-///
-/// // Blocking read with 5 second timeout
-/// let result = xread(
-///     "server-1".to_string(),
-///     &mut store,
-///     &mut state,
-///     vec!["BLOCK".to_string(), "5000".to_string(), "STREAMS".to_string(),
-///          "mystream".to_string(), "$".to_string()]
-/// ).await?;
-/// ```
 pub async fn xread(
     client_address: &str,
     store: Arc<Mutex<KeyValueStore>>,
@@ -202,31 +117,6 @@ pub async fn xread(
     }
 }
 
-/// Parses and validates stream IDs, handling special cases.
-///
-/// Processes key-stream ID pairs and resolves special stream ID values.
-/// The "$" stream ID is resolved to the last entry ID in the stream.
-///
-/// # Arguments
-///
-/// * `store` - Thread-safe reference to the key-value store
-/// * `key_stream_id_pairs` - Vector of (key, stream_id) pairs to process
-///
-/// # Returns
-///
-/// * `Ok(Vec<(String, String)>)` - Processed pairs with resolved stream IDs
-/// * `Err(CommandError::DataNotFound)` - If a key doesn't exist when resolving "$"
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If a key is not a stream
-///
-/// # Examples
-///
-/// ```ignore
-/// let pairs = vec![
-///     ("stream1".to_string(), "1234-0".to_string()),
-///     ("stream2".to_string(), "$".to_string())  // Will be resolved to last entry ID
-/// ];
-/// let resolved = parse_stream_ids(&mut store, pairs).await?;
-/// ```
 async fn parse_stream_ids(
     store: Arc<Mutex<KeyValueStore>>,
     key_stream_id_pairs: Vec<(String, String)>,
@@ -247,29 +137,6 @@ async fn parse_stream_ids(
     Ok(parsed_key_stream_id_pairs)
 }
 
-/// Resolves the special "$" stream ID to the last entry ID in a stream.
-///
-/// The "$" symbol represents the ID of the last entry in the stream.
-/// This is commonly used in XREAD to start reading from new entries only.
-///
-/// # Arguments
-///
-/// * `store` - Thread-safe reference to the key-value store
-/// * `key` - The stream key to resolve the last ID for
-///
-/// # Returns
-///
-/// * `Ok(String)` - The last stream entry ID in the format "timestamp-sequence"
-/// * `Err(CommandError::DataNotFound)` - If the key doesn't exist or stream is empty
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If the key is not a stream
-///
-/// # Examples
-///
-/// ```ignore
-/// // If stream "mystream" has entries ["1000-0", "2000-1", "3000-5"]
-/// let last_id = resolve_special_id(&mut store, "mystream").await?;
-/// // Returns: "3000-5"
-/// ```
 async fn resolve_special_id(
     store: Arc<Mutex<KeyValueStore>>,
     key: &str,
@@ -291,18 +158,6 @@ async fn resolve_special_id(
     Ok(last_stream_id)
 }
 
-/// Registers XREAD subscribers for blocking operations.
-///
-/// When XREAD is called with BLOCK, subscribers are registered to receive
-/// notifications when new data is added to the specified streams. Each
-/// subscriber is associated with a server address and communication channel.
-///
-/// # Arguments
-///
-/// * `state` - Thread-safe reference to server state
-/// * `key_stream_id_pairs` - Stream keys and IDs to subscribe to
-/// * `client_address` - Unique identifier for the client instance
-/// * `sender` - Channel sender for notifications
 async fn add_subscribers(
     state: Arc<Mutex<State>>,
     key_stream_id_pairs: &Vec<(String, String)>,
@@ -320,16 +175,6 @@ async fn add_subscribers(
     }
 }
 
-/// Removes XREAD subscribers after blocking operation completes.
-///
-/// Cleans up subscriber registrations when a blocking XREAD operation
-/// finishes, either due to timeout or receiving data.
-///
-/// # Arguments
-///
-/// * `state` - Thread-safe reference to server state
-/// * `key_stream_id_pairs` - Stream keys and IDs to unsubscribe from
-/// * `client_address` - Client instance identifier used during subscription
 async fn remove_subscribers(
     state: Arc<Mutex<State>>,
     key_stream_id_pairs: &Vec<(String, String)>,
@@ -342,22 +187,6 @@ async fn remove_subscribers(
     }
 }
 
-/// Waits for data notification or timeout in blocking XREAD operations.
-///
-/// Handles the blocking behavior of XREAD by waiting for either:
-/// - A notification that new data is available
-/// - A timeout (if duration > 0)
-/// - Indefinite blocking (if duration = 0)
-///
-/// # Arguments
-///
-/// * `receiver` - Channel receiver for data notifications
-/// * `blocking_duration_ms` - Timeout in milliseconds (0 = block forever)
-///
-/// # Returns
-///
-/// * `Some(bool)` - Notification received indicating data is available
-/// * `None` - Timeout occurred or channel closed
 async fn wait_for_data(
     receiver: &mut mpsc::Receiver<bool>,
     blocking_duration_ms: u64,
@@ -373,32 +202,6 @@ async fn wait_for_data(
     }
 }
 
-/// Reads entries from multiple streams starting after specified IDs.
-///
-/// Retrieves all entries from the specified streams that have IDs greater
-/// than the provided starting IDs. Returns results in RESP array format
-/// with each stream's entries grouped together.
-///
-/// # Arguments
-///
-/// * `store` - Thread-safe reference to the key-value store
-/// * `key_stream_id_pairs` - Vector of (key, start_stream_id) pairs
-///
-/// # Returns
-///
-/// * `Ok(String)` - RESP-encoded array of stream entries
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If a key is not a stream
-/// * `Err(CommandError::InvalidStreamId)` - If a stream ID is malformed
-///
-/// # Format
-///
-/// Returns data in the format:
-/// ```ignore
-/// [
-///   ["stream1", [["id1", ["field1", "value1", ...]], ["id2", [...]]]],
-///   ["stream2", [["id3", ["field2", "value2", ...]]]]
-/// ]
-/// ```
 async fn read_streams(
     store: Arc<Mutex<KeyValueStore>>,
     key_stream_id_pairs: Vec<(String, String)>,
@@ -442,29 +245,6 @@ async fn read_streams(
     return Ok(RespValue::Array(result_streams).encode());
 }
 
-/// Determines if a stream ID comes after another stream ID.
-///
-/// Compares two stream IDs to determine chronological ordering.
-/// Stream IDs are compared first by timestamp, then by sequence number.
-/// Used to filter entries that come after a specified starting point.
-///
-/// # Arguments
-///
-/// * `stream_id` - The stream ID to test (timestamp, sequence)
-/// * `start_stream_id` - The reference stream ID to compare against
-///
-/// # Returns
-///
-/// * `true` - If stream_id comes after start_stream_id
-/// * `false` - If stream_id comes before or equals start_stream_id
-///
-/// # Examples
-///
-/// ```ignore
-/// assert!(is_xread_stream_id_after(&(1000, Some(5)), &(1000, Some(3)))); // true
-/// assert!(!is_xread_stream_id_after(&(1000, Some(3)), &(1000, Some(5)))); // false
-/// assert!(is_xread_stream_id_after(&(1001, Some(0)), &(1000, Some(999)))); // true
-/// ```
 pub fn is_xread_stream_id_after(
     stream_id: &(u128, Option<u128>),
     start_stream_id: &(u128, Option<u128>),
@@ -480,29 +260,6 @@ pub fn is_xread_stream_id_after(
     false
 }
 
-/// Determines if a sequence number comes after another sequence number.
-///
-/// Helper function for comparing sequence parts of stream IDs.
-/// Only returns true if both sequences are present and the first is greater.
-///
-/// # Arguments
-///
-/// * `sequence` - The sequence number to test
-/// * `start_sequence` - The reference sequence number
-///
-/// # Returns
-///
-/// * `true` - If sequence > start_sequence (both must be Some)
-/// * `false` - If sequence <= start_sequence or either is None
-///
-/// # Examples
-///
-/// ```ignore
-/// assert!(is_sequence_after(&Some(5), &Some(3))); // true
-/// assert!(!is_sequence_after(&Some(3), &Some(3))); // false  
-/// assert!(!is_sequence_after(&Some(5), &None)); // false
-/// assert!(!is_sequence_after(&None, &Some(3))); // false
-/// ```
 fn is_sequence_after(sequence: &Option<u128>, start_sequence: &Option<u128>) -> bool {
     match (sequence, start_sequence) {
         (Some(s), Some(start)) => s > start,

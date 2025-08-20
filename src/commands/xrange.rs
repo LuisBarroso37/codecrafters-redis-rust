@@ -11,51 +11,13 @@ use crate::{
     resp::RespValue,
 };
 
-/// Represents the parsed arguments for the XRANGE command.
-///
-/// The XRANGE command in Redis returns a range of entries from a stream stored at the given key.
-/// This struct holds the key and the start and end stream IDs for the range operation.
 pub struct XrangeArguments {
-    ///  The name of the stream key to operate on
     key: String,
-    /// The starting stream ID for the range (can be "-" for the beginning)
     start_stream_id: String,
-    /// The ending stream ID for the range (can be "+" for the end)
     end_stream_id: String,
 }
 
 impl XrangeArguments {
-    /// Parses and validates the arguments for the XRANGE command.
-    ///
-    /// The XRANGE command requires exactly three arguments: the key, the start stream ID, and the end stream ID.
-    /// This function checks the argument count and clones the arguments into the struct fields.
-    ///
-    /// # Arguments
-    ///
-    /// * `arguments` - A vector of command arguments: [key, start_stream_id, end_stream_id]
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(XrangeArguments)` - If the arguments are valid
-    /// * `Err(CommandError::InvalidXRangeCommand)` - If the number of arguments is not exactly 3
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Valid usage
-    /// let args = XrangeArguments::parse(vec![
-    ///     "mystream".to_string(),
-    ///     "-".to_string(),
-    ///     "+".to_string()
-    /// ]).unwrap();
-    /// assert_eq!(args.key, "mystream");
-    /// assert_eq!(args.start_stream_id, "-");
-    /// assert_eq!(args.end_stream_id, "+");
-    ///
-    /// // Invalid usage: not enough arguments
-    /// let err = XrangeArguments::parse(vec!["mystream".to_string()]);
-    /// assert!(err.is_err());
-    /// ```
     pub fn parse(arguments: Vec<String>) -> Result<Self, CommandError> {
         if arguments.len() != 3 {
             return Err(CommandError::InvalidXRangeCommand);
@@ -73,39 +35,6 @@ impl XrangeArguments {
     }
 }
 
-/// Handles the Redis XRANGE command.
-///
-/// Returns a range of entries from a Redis stream between two stream IDs.
-/// Supports special values "-" (start from beginning) and "+" (end at latest).
-/// The range is inclusive on both ends.
-///
-/// # Arguments
-///
-/// * `store` - A thread-safe reference to the key-value store
-/// * `arguments` - A vector containing exactly 3 elements: [key, start_id, end_id]
-///
-/// # Returns
-///
-/// * `Ok(String)` - A RESP-encoded array containing the matching stream entries
-/// * `Err(CommandError::InvalidXRangeCommand)` - If the number of arguments is not exactly 3
-/// * `Err(CommandError::InvalidDataTypeForKey)` - If key exists but is not a stream
-/// * `Err(CommandError::InvalidStreamId)` - If start or end stream ID is invalid
-///
-/// # Examples
-///
-/// ```ignore
-/// // XRANGE mystream - +  (get all entries)
-/// let result = xrange(&mut store, vec!["mystream".to_string(), "-".to_string(), "+".to_string()]).await;
-/// // Returns: "*2\r\n*2\r\n$15\r\n1518951480106-0\r\n*4\r\n$4\r\ntemp\r\n$2\r\n25\r\n..."
-///
-/// // XRANGE mystream 1518951480106-0 1518951480107-0  (get entries in range)
-/// let result = xrange(&mut store, vec![
-///     "mystream".to_string(),
-///     "1518951480106-0".to_string(),
-///     "1518951480107-0".to_string()
-/// ]).await;
-/// // Returns: "*1\r\n*2\r\n$15\r\n1518951480106-0\r\n*4\r\n$4\r\ntemp\r\n$2\r\n25\r\n..."
-/// ```
 pub async fn xrange(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
@@ -153,38 +82,6 @@ pub async fn xrange(
     return Ok(CommandResult::Response(resp_value.encode()));
 }
 
-/// Validates and resolves the start stream ID for XRANGE operations.
-///
-/// Handles the special case of "-" which represents the beginning of the stream,
-/// as well as explicit stream IDs. When "-" is provided, it finds the minimum
-/// (earliest) stream ID in the stream and validates it.
-///
-/// # Arguments
-///
-/// * `stream` - A reference to the BTreeMap representing the Redis stream
-/// * `start_stream_id` - The start stream ID string ("-" for beginning or explicit ID)
-///
-/// # Returns
-///
-/// * `Ok(Some((u128, Option<u128>)))` - Successfully validated stream ID as (timestamp, sequence)
-/// * `Ok(None)` - When "-" is used but the stream is empty
-/// * `Err(CommandError::InvalidStreamId)` - When the stream ID format is invalid
-///
-/// # Examples
-///
-/// ```ignore
-/// // For an empty stream
-/// let result = validate_start_stream_id(&empty_stream, "-");
-/// assert_eq!(result, Ok(None));
-///
-/// // For "-" with existing entries
-/// let result = validate_start_stream_id(&stream, "-");
-/// assert_eq!(result, Ok(Some((1234567890, Some(0)))));
-///
-/// // For explicit stream ID
-/// let result = validate_start_stream_id(&stream, "1234567890-5");
-/// assert_eq!(result, Ok(Some((1234567890, Some(5)))));
-/// ```
 fn validate_start_stream_id(
     stream: &BTreeMap<String, Stream>,
     start_stream_id: &str,
@@ -209,38 +106,6 @@ fn validate_start_stream_id(
     }
 }
 
-/// Validates and resolves the end stream ID for XRANGE operations.
-///
-/// Handles the special case of "+" which represents the end of the stream,
-/// as well as explicit stream IDs. When "+" is provided, it finds the maximum
-/// (latest) stream ID in the stream and validates it.
-///
-/// # Arguments
-///
-/// * `stream` - A reference to the BTreeMap representing the Redis stream
-/// * `end_stream_id` - The end stream ID string ("+" for end or explicit ID)
-///
-/// # Returns
-///
-/// * `Ok(Some((u128, Option<u128>)))` - Successfully validated stream ID as (timestamp, sequence)
-/// * `Ok(None)` - When "+" is used but the stream is empty
-/// * `Err(CommandError::InvalidStreamId)` - When the stream ID format is invalid
-///
-/// # Examples
-///
-/// ```ignore
-/// // For an empty stream
-/// let result = validate_end_stream_id(&empty_stream, "+");
-/// assert_eq!(result, Ok(None));
-///
-/// // For "+" with existing entries
-/// let result = validate_end_stream_id(&stream, "+");
-/// assert_eq!(result, Ok(Some((1234567890, Some(10)))));
-///
-/// // For explicit stream ID
-/// let result = validate_end_stream_id(&stream, "1234567890-5");
-/// assert_eq!(result, Ok(Some((1234567890, Some(5)))));
-/// ```
 fn validate_end_stream_id(
     stream: &BTreeMap<String, Stream>,
     end_stream_id: &str,
@@ -265,20 +130,6 @@ fn validate_end_stream_id(
     }
 }
 
-/// Checks if a stream ID falls within a given range (inclusive).
-///
-/// Compares stream IDs which consist of a timestamp and optional sequence number.
-/// The comparison is done first by timestamp, then by sequence number if timestamps are equal.
-///
-/// # Arguments
-///
-/// * `stream_id` - The stream ID to check (timestamp, sequence)
-/// * `start_stream_id` - The start of the range (inclusive)
-/// * `end_stream_id` - The end of the range (inclusive)
-///
-/// # Returns
-///
-/// * `bool` - true if the stream ID is within the range, false otherwise
 fn is_stream_id_in_range(
     stream_id: &(u128, Option<u128>),
     start_stream_id: &(u128, Option<u128>),
@@ -303,20 +154,6 @@ fn is_stream_id_in_range(
     false
 }
 
-/// Checks if a sequence number falls within a given range (inclusive).
-///
-/// Handles the case where sequence numbers might be None (representing 0).
-/// Used when comparing stream IDs with the same timestamp.
-///
-/// # Arguments
-///
-/// * `sequence` - The sequence number to check
-/// * `start_sequence` - The start of the range (inclusive)
-/// * `end_sequence` - The end of the range (inclusive)
-///
-/// # Returns
-///
-/// * `bool` - true if the sequence is within the range, false otherwise
 fn is_sequence_in_range(
     sequence: &Option<u128>,
     start_sequence: &Option<u128>,
@@ -331,19 +168,6 @@ fn is_sequence_in_range(
     }
 }
 
-/// Checks if a sequence number is greater than or equal to a start sequence.
-///
-/// Used for range boundary checking when the timestamp matches the start timestamp.
-/// None is treated as 0 for comparison purposes.
-///
-/// # Arguments
-///
-/// * `sequence` - The sequence number to check
-/// * `start_sequence` - The minimum sequence number (inclusive)
-///
-/// # Returns
-///
-/// * `bool` - true if sequence >= start_sequence, false otherwise
 fn is_sequence_at_or_after(sequence: &Option<u128>, start_sequence: &Option<u128>) -> bool {
     match (sequence, start_sequence) {
         (Some(s), Some(start)) => s >= start,
@@ -352,19 +176,6 @@ fn is_sequence_at_or_after(sequence: &Option<u128>, start_sequence: &Option<u128
     }
 }
 
-/// Checks if a sequence number is less than or equal to an end sequence.
-///
-/// Used for range boundary checking when the timestamp matches the end timestamp.
-/// None is treated as 0 for comparison purposes.
-///
-/// # Arguments
-///
-/// * `sequence` - The sequence number to check
-/// * `end_sequence` - The maximum sequence number (inclusive)
-///
-/// # Returns
-///
-/// * `bool` - true if sequence <= end_sequence, false otherwise
 fn is_sequence_at_or_before(sequence: &Option<u128>, end_sequence: &Option<u128>) -> bool {
     match (sequence, end_sequence) {
         (Some(s), Some(end)) => s <= end,

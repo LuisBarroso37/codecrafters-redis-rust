@@ -1,9 +1,3 @@
-//! Redis server implementation and configuration.
-//!
-//! This module contains the core Redis server logic, including server configuration,
-//! role management (master/replica), and the main server loop that handles incoming
-//! client connections. It supports both standalone and replication modes.
-
 use std::{collections::HashMap, sync::Arc};
 
 use rand::distr::{Alphanumeric, SampleString};
@@ -21,7 +15,6 @@ use crate::input::handshake;
 use crate::resp::RespValue;
 use crate::{connection::handle_master_to_client_connection, state::State};
 
-/// Errors that can occur during command-line argument parsing and server setup.
 #[derive(Error, Debug, PartialEq, Clone)]
 pub enum CliError {
     #[error("Invalid command line flag")]
@@ -34,28 +27,13 @@ pub enum CliError {
     InvalidMasterPort,
 }
 
-/// Represents the role of a Redis server instance.
-///
-/// A Redis server can operate in one of two modes:
-/// - Master: Accepts write commands from clients and replicates them to replicas
-/// - Replica: Receives commands from a master server and serves read-only requests
 #[derive(Debug, PartialEq, Clone)]
 pub enum RedisRole {
-    /// A master server that can accept write commands
     Master,
-    /// A replica server connected to a master at the specified (host, port)
     Replica((String, u32)),
 }
 
 impl RedisRole {
-    /// Returns a string representation of the server role.
-    ///
-    /// This is used for the INFO command and other introspection operations.
-    ///
-    /// # Returns
-    ///
-    /// * "master" - If the server is operating as a master
-    /// * "slave" - If the server is operating as a replica (uses Redis terminology)
     pub fn as_string(&self) -> &str {
         match self {
             RedisRole::Master => "master",
@@ -70,60 +48,17 @@ pub struct Replica {
     pub offset: usize,
 }
 
-/// Configuration and state for a Redis server instance.
-///
-/// Contains all the necessary configuration and runtime state for a Redis server,
-/// including network settings, replication configuration, and connection management.
-/// Supports both master and replica server modes.
 #[derive(Debug, Clone)]
 pub struct RedisServer {
-    /// The TCP port number the server listens on
     pub port: u32,
-    /// The server's role (Master or Replica with master address)
     pub role: RedisRole,
-    /// Unique replication ID for this server instance (40-character hex string)
     pub repl_id: String,
-    /// Current replication offset for tracking synchronized data
     pub repl_offset: usize,
-    /// Map of replica connections (only present for master servers)
     pub replicas: Option<HashMap<String, Replica>>,
-    /// List of commands that are considered write operations
     pub write_commands: Vec<&'static str>,
 }
 
 impl RedisServer {
-    /// Creates a new Redis server instance from command-line arguments.
-    ///
-    /// Parses command-line arguments to configure the server's port, role, and
-    /// replication settings. Generates a unique replication ID for the server.
-    ///
-    /// # Arguments
-    ///
-    /// * `command_line_args` - Iterator over command-line arguments (typically from `std::env::args()`)
-    ///
-    /// # Supported Arguments
-    ///
-    /// * `--port <port>` - Port number to listen on (default: 6379)
-    /// * `--replicaof <host> <port>` - Configure as replica of the specified master
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(RedisServer)` - Successfully configured server instance
-    /// * `Err(CliError)` - If argument parsing fails or invalid values are provided
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Create a master server on port 6379
-    /// let server = RedisServer::new(vec!["redis-server".to_string()])?;
-    ///
-    /// // Create a replica server
-    /// let server = RedisServer::new(vec![
-    ///     "redis-server".to_string(),
-    ///     "--replicaof".to_string(),
-    ///     "127.0.0.1 6379".to_string()
-    /// ])?;
-    /// ```
     pub fn new<I: IntoIterator<Item = String>>(command_line_args: I) -> Result<Self, CliError> {
         let mut iter = command_line_args.into_iter().skip(1);
         let mut port: Option<u32> = None;
@@ -294,48 +229,14 @@ impl RedisServer {
     }
 }
 
-/// Validates a port number from the --port command-line flag.
-///
-/// # Arguments
-///
-/// * `port` - String representation of the port number
-///
-/// # Returns
-///
-/// * `Ok(u32)` - Valid port number in range 1-65535
-/// * `Err(CliError::InvalidPortFlagValue)` - If the port is invalid
 fn validate_port_flag(port: &str) -> Result<u32, CliError> {
     validate_port_with_error(port, CliError::InvalidPortFlagValue)
 }
 
-/// Validates a port number from a master address specification.
-///
-/// # Arguments
-///
-/// * `port` - String representation of the port number
-///
-/// # Returns
-///
-/// * `Ok(u32)` - Valid port number in range 1-65535
-/// * `Err(CliError::InvalidMasterPort)` - If the port is invalid
 fn validate_master_port(port: &str) -> Result<u32, CliError> {
     validate_port_with_error(port, CliError::InvalidMasterPort)
 }
 
-/// Generic port validation with custom error type.
-///
-/// Validates that a port number string represents a valid TCP port number
-/// in the range 1-65535.
-///
-/// # Arguments
-///
-/// * `port` - String representation of the port number
-/// * `error` - The specific error type to return if validation fails
-///
-/// # Returns
-///
-/// * `Ok(u32)` - Valid port number
-/// * `Err(CliError)` - The specified error if validation fails
 fn validate_port_with_error(port: &str, error: CliError) -> Result<u32, CliError> {
     let port_number = port.parse::<u32>().map_err(|_| error.clone())?;
 
@@ -346,26 +247,6 @@ fn validate_port_with_error(port: &str, error: CliError) -> Result<u32, CliError
     Ok(port_number)
 }
 
-/// Validates and parses a master server address specification.
-///
-/// Parses a master address in the format "host port" where host can be
-/// an IPv4 address or hostname, and port is a valid TCP port number.
-///
-/// # Arguments
-///
-/// * `master_address` - Space-separated string containing host and port (e.g., "127.0.0.1 6379")
-///
-/// # Returns
-///
-/// * `Ok((String, u32))` - Tuple containing (hostname/IP, port)
-/// * `Err(CliError::InvalidMasterAddress)` - If the format is invalid
-/// * `Err(CliError::InvalidMasterPort)` - If the port number is invalid
-///
-/// # Supported Host Formats
-///
-/// - IPv4 addresses: "192.168.1.1"
-/// - Hostnames: "localhost", "redis-master.example.com"
-/// - Must not contain invalid characters or exceed reasonable length limits
 fn validate_master_address(master_address: &str) -> Result<(String, u32), CliError> {
     let ipv4_regex = Regex::new(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$").unwrap();
     let hostname_regex = Regex::new(r"^[a-zA-Z0-9\-\.]+$").unwrap();

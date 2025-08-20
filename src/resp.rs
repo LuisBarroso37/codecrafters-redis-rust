@@ -1,17 +1,7 @@
-//! Redis Serialization Protocol (RESP) implementation.
-//!
-//! This module provides encoding and decoding functionality for the Redis Serialization Protocol,
-//! which is used for communication between Redis clients and servers. It supports all standard
-//! RESP data types including strings, integers, arrays, errors, and null values.
-
 use std::slice::Iter;
 
 use thiserror::Error;
 
-/// Errors that can occur during RESP (Redis Serialization Protocol) parsing.
-///
-/// RESP is the protocol used by Redis for communication between clients and servers.
-/// These errors represent various parsing failures that can occur.
 #[derive(Error, Debug, PartialEq)]
 pub enum RespError {
     #[error("unknown RESP type")]
@@ -41,47 +31,18 @@ impl RespError {
     }
 }
 
-/// Represents a value in the Redis Serialization Protocol (RESP).
-///
-/// RESP supports several data types that correspond to different Redis values:
-/// - SimpleString: Single-line strings without spaces (e.g., "OK", "PONG")
-/// - Error: Error messages from the server
-/// - Integer: 64-bit signed integers
-/// - BulkString: Binary-safe strings of any length
-/// - Array: Ordered collections of RESP values
-/// - Null: Represents absence of a value
 #[derive(Debug, PartialEq, Clone)]
 pub enum RespValue {
-    /// Simple string values (prefixed with '+')
     SimpleString(String),
-    /// Error messages (prefixed with '-')
     Error(String),
-    /// Integer values (prefixed with ':')
     Integer(i64),
-    /// Binary-safe string values (prefixed with '$')
     BulkString(String),
-    /// Arrays of RESP values (prefixed with '*')
     Array(Vec<RespValue>),
-    /// Null string value (represented as "$-1\r\n")
     NullBulkString,
-    /// Null array value (represented as "*-1\r\n")
     NullArray,
 }
 
 impl RespValue {
-    /// Parses a vector of string lines into RESP values.
-    ///
-    /// Takes raw protocol data split by lines and converts it into
-    /// structured RESP values that can be processed by command handlers.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - Vector of string lines from the RESP protocol
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Vec<RespValue>)` - Successfully parsed RESP values
-    /// * `Err(RespError)` - If parsing fails due to invalid format
     pub fn parse(data: Vec<&str>) -> Result<Vec<RespValue>, RespError> {
         let mut data_iter = data.iter();
         let mut vec = Vec::new();
@@ -94,20 +55,6 @@ impl RespValue {
         Ok(vec)
     }
 
-    /// Decodes a single RESP value from a string and iterator of remaining data.
-    ///
-    /// This is the core parsing function that handles different RESP type prefixes
-    /// and extracts the appropriate data from the protocol stream.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The current line containing the RESP type prefix and metadata
-    /// * `rest_of_data` - Iterator over remaining lines for multi-line values
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(RespValue)` - Successfully decoded RESP value
-    /// * `Err(RespError)` - If the value format is invalid
     pub fn decode(value: &str, rest_of_data: &mut Iter<'_, &str>) -> Result<Self, RespError> {
         let Some(prefix) = value.chars().next() else {
             return Err(RespError::UnknownRespType);
@@ -131,33 +78,6 @@ impl RespValue {
         }
     }
 
-    /// Helper function to decode RESP bulk strings.
-    ///
-    /// Bulk strings are binary-safe strings that can contain any sequence of bytes.
-    /// They are encoded as `$<length>\r\n<data>\r\n` where length is the number
-    /// of bytes in the data portion. Special case: `$-1\r\n` represents a null bulk string.
-    ///
-    /// # Arguments
-    ///
-    /// * `length_str` - The length portion of the bulk string (without the '$' prefix)
-    /// * `rest_of_data` - Iterator over remaining lines containing the actual string data
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(RespValue::BulkString)` - Successfully decoded bulk string
-    /// * `Ok(RespValue::NullBulkString)` - If length is -1 (null bulk string)
-    /// * `Err(RespError::InvalidBulkString)` - If length parsing fails, length is negative (except -1),
-    ///   no data line follows, or data length doesn't match declared length
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // For input "$5\r\nhello\r\n"
-    /// decode_bulk_string("5", &mut iter) // Returns: Ok(BulkString("hello"))
-    ///
-    /// // For null bulk string "$-1\r\n"
-    /// decode_bulk_string("-1", &mut iter) // Returns: Ok(NullBulkString)
-    /// ```
     fn decode_bulk_string(
         length_str: &str,
         rest_of_data: &mut Iter<'_, &str>,
@@ -187,33 +107,6 @@ impl RespValue {
         Ok(RespValue::BulkString(next_line.to_string()))
     }
 
-    /// Helper function to decode RESP arrays.
-    ///
-    /// Arrays are ordered collections of RESP values encoded as `*<count>\r\n<element1><element2>...`
-    /// where count is the number of elements. Each element is a complete RESP value.
-    /// Special case: `*-1\r\n` represents a null array.
-    ///
-    /// # Arguments
-    ///
-    /// * `length_str` - The count portion of the array (without the '*' prefix)
-    /// * `rest_of_data` - Iterator over remaining lines containing the array elements
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(RespValue::Array)` - Successfully decoded array with all elements
-    /// * `Ok(RespValue::NullArray)` - If count is -1 (null array)
-    /// * `Err(RespError::InvalidArray)` - If count parsing fails, count is negative (except -1),
-    ///   insufficient data for declared number of elements, or any element fails to decode
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // For input "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n"
-    /// decode_array("2", &mut iter) // Returns: Ok(Array([BulkString("hello"), BulkString("world")]))
-    ///
-    /// // For null array "*-1\r\n"
-    /// decode_array("-1", &mut iter) // Returns: Ok(NullArray)
-    /// ```
     fn decode_array(
         length_str: &str,
         rest_of_data: &mut Iter<'_, &str>,
@@ -247,25 +140,6 @@ impl RespValue {
         Ok(RespValue::Array(array_elements))
     }
 
-    /// Encodes a RESP value back into its wire format.
-    ///
-    /// Converts a structured RESP value into the string format that can be
-    /// sent over the network to Redis clients. Each value type has its own
-    /// encoding format with appropriate prefixes and terminators.
-    ///
-    /// # Returns
-    ///
-    /// * `String` - The RESP-encoded string representation
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let value = RespValue::SimpleString("OK".to_string());
-    /// assert_eq!(value.encode(), "+OK\r\n");
-    ///
-    /// let value = RespValue::Integer(42);
-    /// assert_eq!(value.encode(), ":42\r\n");
-    /// ```
     pub fn encode(&self) -> String {
         match self {
             RespValue::SimpleString(s) => {
@@ -302,27 +176,6 @@ impl RespValue {
         }
     }
 
-    /// Convenience method to encode a vector of strings as a RESP array.
-    ///
-    /// Creates a RESP array where each string becomes a bulk string element.
-    /// This is commonly used for encoding Redis command responses that contain
-    /// multiple string values.
-    ///
-    /// # Arguments
-    ///
-    /// * `elements` - Vector of strings to encode as an array
-    ///
-    /// # Returns
-    ///
-    /// * `String` - RESP-encoded array of bulk strings
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let elements = vec!["hello".to_string(), "world".to_string()];
-    /// let encoded = RespValue::encode_array_from_strings(elements);
-    /// // Returns: "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n"
-    /// ```
     pub fn encode_array_from_strings(elements: Vec<String>) -> String {
         let mut encoded_elements = Vec::new();
 

@@ -1,9 +1,3 @@
-//! Input handling and network communication for Redis server.
-//!
-//! This module provides functionality for reading and parsing commands from network streams,
-//! handling the Redis replication handshake process, and managing communication with master
-//! servers in replica mode. It bridges the gap between raw TCP data and parsed RESP commands.
-
 use std::sync::Arc;
 
 use regex::Regex;
@@ -16,7 +10,6 @@ use crate::commands::CommandError;
 use crate::resp::{RespError, RespValue};
 use crate::server::RedisServer;
 
-/// Errors that can occur while reading and parsing commands from network streams.
 #[derive(Error, Debug, PartialEq)]
 pub enum CommandReadError {
     #[error("I/O error: {0}")]
@@ -50,28 +43,6 @@ impl CommandReadError {
     }
 }
 
-/// Parses raw input bytes into string lines for RESP processing.
-///
-/// Converts the byte stream from a TCP connection into string lines
-/// that can be processed by the RESP parser. Handles UTF-8 validation
-/// and splits on RESP line terminators.
-///
-/// # Arguments
-///
-/// * `input` - Raw bytes received from the client
-///
-/// # Returns
-///
-/// * `Ok(Vec<&str>)` - Vector of string lines ready for RESP parsing
-/// * `Err(CommandReadError::InvalidUtf8)` - If the input contains invalid UTF-8
-///
-/// # Examples
-///
-/// ```ignore
-/// let input = b"*2\r\n$4\r\nPING\r\n";
-/// let lines = parse_input(input)?;
-/// // Returns: vec!["*2", "$4", "PING"]
-/// ```
 pub fn parse_input(input: &[u8]) -> Result<Vec<&str>, CommandReadError> {
     let str = str::from_utf8(input)?;
 
@@ -81,27 +52,6 @@ pub fn parse_input(input: &[u8]) -> Result<Vec<&str>, CommandReadError> {
         .collect::<Vec<&str>>())
 }
 
-/// Reads raw data from a stream and parses it into RESP values.
-///
-/// This function handles the low-level reading from network streams and converts
-/// the raw bytes into parsed RESP protocol values that can be processed as Redis commands.
-///
-/// # Type Parameters
-///
-/// * `R` - Any type that implements AsyncReadExt and Unpin (typically a TcpStream)
-///
-/// # Arguments
-///
-/// * `stream` - The stream to read data from
-/// * `buffer` - A mutable buffer to store the read data (must be exactly 1024 bytes)
-///
-/// # Returns
-///
-/// * `Ok(Vec<RespValue>)` - Successfully parsed RESP values
-/// * `Err(CommandReadError::IoError)` - If reading from the stream fails
-/// * `Err(CommandReadError::ConnectionClosed)` - If the connection is closed (0 bytes read)
-/// * `Err(CommandReadError::InvalidUtf8)` - If the data contains invalid UTF-8
-/// * `Err(CommandReadError::RespParseError)` - If RESP parsing fails
 pub async fn read_and_parse_resp<R>(
     stream: &mut R,
     buffer: &mut [u8; 1024],
@@ -124,35 +74,6 @@ where
     Ok(parsed_input)
 }
 
-/// Performs the Redis replication handshake between replica and master.
-///
-/// This function implements the complete Redis replication handshake protocol:
-/// 1. PING/PONG exchange to verify connectivity
-/// 2. REPLCONF listening-port to announce replica's port
-/// 3. REPLCONF capa psync2 to negotiate protocol capabilities  
-/// 4. PSYNC command to initiate replication
-/// 5. Receiving the RDB snapshot from the master
-///
-/// After successful handshake, the replica is ready to receive ongoing
-/// replication commands from the master.
-///
-/// # Arguments
-///
-/// * `stream` - Mutable TCP stream connected to the master server
-/// * `server` - Thread-safe reference to the replica server configuration
-///
-/// # Returns
-///
-/// * `Ok(())` - Handshake completed successfully
-/// * `Err(CommandReadError)` - If any step of the handshake fails
-///
-/// # Protocol Details
-///
-/// The handshake follows the Redis replication protocol:
-/// - Master must respond with PONG to PING
-/// - Master must respond with OK to both REPLCONF commands
-/// - Master must respond with FULLRESYNC to PSYNC
-/// - Master must send a valid RDB file after FULLRESYNC
 pub async fn handshake(
     stream: &mut TcpStream,
     server: Arc<RwLock<RedisServer>>,
