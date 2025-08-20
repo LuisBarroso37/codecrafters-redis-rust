@@ -15,7 +15,7 @@ async fn test_handle_xread_command() {
             for j in 0..=3 {
                 let stream_id = format!("{}-{}", &first_stream_id_part, j);
 
-                env.exec_command_ok(
+                env.exec_command_immediate_success_response(
                     TestUtils::xadd_command(
                         key,
                         &stream_id,
@@ -54,7 +54,7 @@ async fn test_handle_xread_command() {
     ];
 
     for (keys, start_stream_ids, expected_response) in test_cases {
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xread_command(keys, start_stream_ids),
             &TestUtils::client_address(41844),
             expected_response,
@@ -70,7 +70,7 @@ async fn test_handle_xread_command_zero_zero_allowed() {
     for i in 1..=2 {
         let stream_id = format!("0-{}", i);
 
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 &stream_id,
@@ -82,7 +82,7 @@ async fn test_handle_xread_command_zero_zero_allowed() {
         .await;
     }
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xread_command(&["fruits"], &["0-0"]),
         &TestUtils::client_address(41844),
         "*1\r\n*2\r\n$6\r\nfruits\r\n*2\r\n*2\r\n$3\r\n0-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n*2\r\n$3\r\n0-2\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
@@ -97,7 +97,7 @@ async fn test_handle_xread_command_data_not_found() {
     for i in 0..=1 {
         let stream_id = format!("1526919030404-{}", i);
 
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 &stream_id,
@@ -109,7 +109,7 @@ async fn test_handle_xread_command_data_not_found() {
         .await;
     }
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
         &TestUtils::client_address(41844),
         "*0\r\n",
@@ -121,14 +121,14 @@ async fn test_handle_xread_command_data_not_found() {
 async fn test_handle_xread_command_invalid_data_type() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("fruit", "mango"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::xread_command(&["fruit"], &["1526919030424-0"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidDataTypeForKey,
@@ -140,7 +140,7 @@ async fn test_handle_xread_command_invalid_data_type() {
 async fn test_handle_xread_command_key_not_found() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xread_command(&["fruits"], &["1526919030424-0"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&[]),
@@ -207,8 +207,12 @@ async fn test_handle_xread_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }
 
@@ -219,7 +223,7 @@ async fn test_handle_xread_blocking_command_direct_response() {
     let start_stream_id = "1526919030404-0";
     let added_stream_id = "1526919030404-1";
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command(
             "fruits",
             &added_stream_id,
@@ -230,7 +234,7 @@ async fn test_handle_xread_blocking_command_direct_response() {
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xread_blocking_command("0", &["fruits"], &[start_stream_id]),
         &TestUtils::client_address(41844),
         "*1\r\n*2\r\n$6\r\nfruits\r\n*1\r\n*2\r\n$15\r\n1526919030404-1\r\n*4\r\n$5\r\nmango\r\n$5\r\napple\r\n$9\r\nraspberry\r\n$4\r\npear\r\n",
@@ -261,7 +265,7 @@ async fn test_xread_simple_blocking() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 added_stream_id,
@@ -287,7 +291,7 @@ async fn test_xread_blocking_timeout_behavior() {
 
     // Client tries XREAD with timeout on empty stream
     // Should timeout and return null
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xread_blocking_command("1000", &["empty_stream"], &["1526919030404-1"]),
         &TestUtils::client_address(12350),
         &TestUtils::expected_null(),
@@ -324,7 +328,7 @@ async fn test_xread_zero_timeout_infinite_wait() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 added_stream_id,
@@ -349,7 +353,7 @@ async fn test_xread_concurrent_clients_direct_response() {
     let added_stream_id = "1526919030404-1";
 
     // Pre-populate the stream
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command(
             "fruits",
             &added_stream_id,
@@ -435,7 +439,7 @@ async fn test_xread_concurrent_clients_different_keys() {
         let key_name = format!("fruits_{}", i);
         let server_port = 12420 + i;
 
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xadd_command(&key_name, &added_stream_id, &["mango", "apple"]),
             &TestUtils::client_address(server_port),
             &TestUtils::expected_bulk_string(&added_stream_id),
@@ -494,7 +498,7 @@ async fn test_xread_concurrent_clients_multiple_pushes_with_incremental_stream_i
         let added_stream_id = format!("1526919030404-{}", i + 1);
 
         env_mut
-            .exec_command_ok(
+            .exec_command_immediate_success_response(
                 TestUtils::xadd_command(
                     "fruits",
                     &added_stream_id,
@@ -564,7 +568,7 @@ async fn test_xread_concurrent_clients_fanout() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 &added_stream_id,
@@ -622,7 +626,7 @@ async fn test_xread_simple_blocking_with_special_id_return_immediately_if_stream
 async fn test_xread_simple_blocking_with_special_id() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command(
             "fruits",
             "1526919030404-0",
@@ -649,7 +653,7 @@ async fn test_xread_simple_blocking_with_special_id() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 "1526919030404-1",
@@ -690,7 +694,7 @@ async fn test_xread_multiple_streams_single_client() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
             &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
@@ -698,7 +702,7 @@ async fn test_xread_multiple_streams_single_client() {
         .await;
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command("vegetables", "1526919030404-1", &["carrot", "potato"]),
             &TestUtils::client_address(41845),
             &TestUtils::expected_bulk_string("1526919030404-1"),
@@ -748,7 +752,7 @@ async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
             &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
@@ -799,7 +803,7 @@ async fn test_xread_multiple_streams_concurrent_clients_same_streams() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
             &TestUtils::client_address(41844),
             &TestUtils::expected_bulk_string("1526919030404-1"),
@@ -835,14 +839,14 @@ async fn test_xread_multiple_streams_concurrent_clients_special_ids() {
     let mut env = TestEnv::new_master_server();
 
     // Pre-populate both streams
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command("fruits", "1526919030404-0", &["orange", "banana"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("1526919030404-0"),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command("vegetables", "1526919030404-0", &["onion", "garlic"]),
         &TestUtils::client_address(41845),
         &TestUtils::expected_bulk_string("1526919030404-0"),
@@ -868,14 +872,14 @@ async fn test_xread_multiple_streams_concurrent_clients_special_ids() {
     TestUtils::sleep_ms(500).await;
 
     // Push new entries to both streams
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command("fruits", "1526919030404-1", &["mango", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("1526919030404-1"),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command("vegetables", "1526919030404-1", &["carrot", "potato"]),
         &TestUtils::client_address(41845),
         &TestUtils::expected_bulk_string("1526919030404-1"),

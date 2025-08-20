@@ -7,7 +7,7 @@
 
 use thiserror::Error;
 
-use crate::resp::RespValue;
+use crate::{resp::RespValue, state::StateError};
 
 /// Comprehensive error type for all Redis command processing failures.
 ///
@@ -74,6 +74,18 @@ pub enum CommandError {
     InvalidIncrCommand,
     #[error("invalid INCR value")]
     InvalidIncrValue,
+    #[error("invalid MULTI command")]
+    InvalidMultiCommand,
+    #[error("transaction error")]
+    TransactionError(#[from] StateError),
+    #[error("invalid EXEC command")]
+    InvalidExecCommand,
+    #[error("EXEC without MULTI")]
+    ExecWithoutMulti,
+    #[error("invalid DISCARD command")]
+    InvalidDiscardCommand,
+    #[error("discard without multi")]
+    DiscardWithoutMulti,
     #[error("invalid INFO command")]
     InvalidInfoCommand,
     #[error("invalid INFO section")]
@@ -92,6 +104,8 @@ pub enum CommandError {
     InvalidWaitCommandArgument,
     #[error("invalid WAIT command for replica")]
     InvalidWaitCommandForReplica,
+    #[error("replica can only process read commands from clients")]
+    ReplicaReadOnlyCommands,
 }
 
 impl CommandError {
@@ -179,6 +193,24 @@ impl CommandError {
             CommandError::InvalidIncrValue => {
                 RespValue::Error("ERR value is not an integer or out of range".to_string()).encode()
             }
+            CommandError::InvalidMultiCommand => {
+                RespValue::Error("ERR Invalid MULTI command".to_string()).encode()
+            }
+            CommandError::TransactionError(e) => {
+                RespValue::Error(format!("ERR {}", e.as_string())).encode()
+            }
+            CommandError::InvalidExecCommand => {
+                RespValue::Error("ERR Invalid EXEC command".to_string()).encode()
+            }
+            CommandError::ExecWithoutMulti => {
+                RespValue::Error("ERR EXEC without MULTI".to_string()).encode()
+            }
+            CommandError::InvalidDiscardCommand => {
+                RespValue::Error("ERR Invalid DISCARD command".to_string()).encode()
+            }
+            CommandError::DiscardWithoutMulti => {
+                RespValue::Error("ERR DISCARD without MULTI".to_string()).encode()
+            }
             CommandError::InvalidInfoCommand => {
                 RespValue::Error("ERR Invalid INFO command".to_string()).encode()
             }
@@ -206,6 +238,10 @@ impl CommandError {
             CommandError::InvalidWaitCommandForReplica => {
                 RespValue::Error("ERR Invalid WAIT command for replica".to_string()).encode()
             }
+            CommandError::ReplicaReadOnlyCommands => RespValue::Error(
+                "ERR replica can only process read commands from clients".to_string(),
+            )
+            .encode(),
         }
     }
 }

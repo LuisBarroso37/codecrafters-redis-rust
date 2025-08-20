@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::CommandError,
+    commands::{CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
 };
@@ -113,7 +113,7 @@ impl IncrArguments {
 pub async fn incr(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let incr_arguments = IncrArguments::parse(arguments)?;
 
     let mut store_guard = store.lock().await;
@@ -126,7 +126,7 @@ pub async fn incr(
                 expiration: None,
             },
         );
-        return Ok(RespValue::Integer(1).encode());
+        return Ok(CommandResult::Response(RespValue::Integer(1).encode()));
     };
 
     match value.data {
@@ -137,7 +137,9 @@ pub async fn incr(
             let incremented_int = int + 1;
             *stored_data = incremented_int.to_string();
 
-            Ok(RespValue::Integer(incremented_int).encode())
+            Ok(CommandResult::Response(
+                RespValue::Integer(incremented_int).encode(),
+            ))
         }
         _ => return Err(CommandError::InvalidDataTypeForKey),
     }

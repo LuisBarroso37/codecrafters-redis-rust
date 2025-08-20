@@ -18,8 +18,12 @@ async fn test_handle_info_command_master_server() {
     ];
 
     for (command, response) in test_cases {
-        env.exec_command_ok(command, &TestUtils::client_address(41844), response)
-            .await;
+        env.exec_command_immediate_success_response(
+            command,
+            &TestUtils::client_address(41844),
+            response,
+        )
+        .await;
     }
 }
 
@@ -39,8 +43,12 @@ async fn test_handle_info_command_replica_server() {
     ];
 
     for (command, response) in test_cases {
-        env.exec_command_ok(command, &TestUtils::client_address(41844), &response)
-            .await;
+        env.exec_command_immediate_success_response(
+            command,
+            &TestUtils::client_address(41844),
+            &response,
+        )
+        .await;
     }
 }
 
@@ -48,7 +56,7 @@ async fn test_handle_info_command_replica_server() {
 async fn test_handle_info_command_invalid() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["INFO", "replication", "server"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidInfoCommand,
@@ -60,7 +68,7 @@ async fn test_handle_info_command_invalid() {
 async fn test_handle_info_command_invalid_section() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["INFO", "random"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidInfoSection,

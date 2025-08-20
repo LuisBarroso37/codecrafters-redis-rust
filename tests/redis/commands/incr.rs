@@ -9,7 +9,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_incr_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grape", "5"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -27,7 +27,7 @@ async fn test_handle_incr_command() {
     );
     drop(store_guard);
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::incr_command("grape"),
         &TestUtils::client_address(41845),
         &TestUtils::expected_integer(6),
@@ -61,8 +61,12 @@ async fn test_handle_incr_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }
 
@@ -75,7 +79,7 @@ async fn test_handle_get_command_non_existent_key() {
     assert_eq!(value, None);
     drop(store_guard);
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::incr_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(1),
@@ -97,14 +101,14 @@ async fn test_handle_get_command_non_existent_key() {
 async fn test_handle_incr_command_invalid_value() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grape", "not_a_number"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::incr_command("grape"),
         &TestUtils::client_address(41845),
         CommandError::InvalidIncrValue,

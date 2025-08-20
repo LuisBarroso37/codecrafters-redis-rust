@@ -3,7 +3,7 @@ use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
     state::State,
@@ -87,7 +87,7 @@ pub async fn rpush(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     return push_array_operations(store, state, arguments, false).await;
 }
 
@@ -120,7 +120,7 @@ pub async fn lpush(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     return push_array_operations(store, state, arguments, true).await;
 }
 
@@ -145,7 +145,7 @@ async fn push_array_operations(
     state: Arc<Mutex<State>>,
     arguments: Vec<String>,
     should_prepend: bool,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let push_array_arguments = PushArrayOperations::parse(arguments, should_prepend)?;
 
     let (pushed_values_count, was_empty_before) = {
@@ -191,7 +191,9 @@ async fn push_array_operations(
         state_guard.send_to_blpop_subscriber(&push_array_arguments.key, true);
     }
 
-    return Ok(RespValue::Integer(pushed_values_count as i64).encode());
+    return Ok(CommandResult::Response(
+        RespValue::Integer(pushed_values_count as i64).encode(),
+    ));
 }
 
 /// Adds multiple values to a list in the specified direction.

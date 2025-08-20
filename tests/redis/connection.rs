@@ -6,7 +6,10 @@ use tokio::{
 };
 
 use codecrafters_redis::{
-    connection::{handle_client_connection, handle_master_connection},
+    connection::{
+        handle_master_to_client_connection, handle_master_to_replica_connection,
+        handle_replica_to_client_connection,
+    },
     key_value_store::{DataType, Value},
     resp::RespValue,
 };
@@ -14,7 +17,7 @@ use codecrafters_redis::{
 use crate::test_utils::{TestEnv, TestUtils};
 
 #[tokio::test]
-async fn test_handle_client_connection_basic_commands() {
+async fn test_handle_master_to_client_connection_basic_commands() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
 
@@ -26,7 +29,7 @@ async fn test_handle_client_connection_basic_commands() {
         let (stream, addr) = listener.accept().await.unwrap();
         let client_address = addr.to_string();
 
-        handle_client_connection(stream, server, client_address, store, state).await;
+        handle_master_to_client_connection(stream, server, client_address, store, state).await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -69,7 +72,7 @@ async fn test_handle_client_connection_basic_commands() {
 }
 
 #[tokio::test]
-async fn test_handle_client_connection_replica_write_forbidden() {
+async fn test_handle_replica_to_client_connection_forbidden_write_commands() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
 
@@ -81,7 +84,7 @@ async fn test_handle_client_connection_replica_write_forbidden() {
         let (stream, addr) = listener.accept().await.unwrap();
         let client_address = addr.to_string();
 
-        handle_client_connection(stream, server, client_address, store, state).await;
+        handle_replica_to_client_connection(stream, server, client_address, store, state).await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -95,7 +98,7 @@ async fn test_handle_client_connection_replica_write_forbidden() {
         &mut client,
         &mut buffer,
         TestUtils::set_command("test_key", "test_value"),
-        RespValue::Error("ERR write commands not allowed in replica".to_string()),
+        RespValue::Error("ERR replica can only process read commands from clients".to_string()),
     )
     .await;
 
@@ -114,7 +117,7 @@ async fn test_handle_client_connection_replica_write_forbidden() {
 }
 
 #[tokio::test]
-async fn test_handle_master_connection_processes_commands() {
+async fn test_handle_master_to_client_connection_processes_commands() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let replica_addr = listener.local_addr().unwrap();
 
@@ -123,10 +126,10 @@ async fn test_handle_master_connection_processes_commands() {
 
     // Spawn replica to handle master connection
     let replica_handle = tokio::spawn(async move {
-        let (mut stream, addr) = listener.accept().await.unwrap();
+        let (stream, addr) = listener.accept().await.unwrap();
         let master_address = addr.to_string();
 
-        handle_master_connection(&master_address, &mut stream, server, store, state).await;
+        handle_master_to_client_connection(stream, server, master_address, store, state).await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -178,7 +181,7 @@ async fn test_handle_master_connection_processes_commands() {
 }
 
 #[tokio::test]
-async fn test_handle_master_connection_incrementing_offset() {
+async fn test_handle_master_to_replica_connection_incrementing_offset() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let replica_addr = listener.local_addr().unwrap();
 
@@ -190,7 +193,8 @@ async fn test_handle_master_connection_incrementing_offset() {
         let (mut stream, addr) = listener.accept().await.unwrap();
         let master_address = addr.to_string();
 
-        handle_master_connection(&master_address, &mut stream, server, store, state).await;
+        handle_master_to_replica_connection(&master_address, &mut stream, server, store, state)
+            .await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -249,7 +253,7 @@ async fn test_handle_master_connection_incrementing_offset() {
 }
 
 #[tokio::test]
-async fn test_handle_master_connection_invalid_commands() {
+async fn test_handle_master_to_replica_connection_invalid_commands() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let replica_addr = listener.local_addr().unwrap();
 
@@ -261,7 +265,8 @@ async fn test_handle_master_connection_invalid_commands() {
         let (mut stream, addr) = listener.accept().await.unwrap();
         let master_address = addr.to_string();
 
-        handle_master_connection(&master_address, &mut stream, server, store, state).await;
+        handle_master_to_replica_connection(&master_address, &mut stream, server, store, state)
+            .await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -301,7 +306,7 @@ async fn test_handle_master_connection_invalid_commands() {
 
 /// Test connection handling with connection close scenarios
 #[tokio::test]
-async fn test_connection_close_handling() {
+async fn test_replica_to_client_connection_close_handling() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server_addr = listener.local_addr().unwrap();
 
@@ -313,7 +318,7 @@ async fn test_connection_close_handling() {
         let (stream, addr) = listener.accept().await.unwrap();
         let client_address = addr.to_string();
 
-        handle_client_connection(stream, server, client_address, store, state).await;
+        handle_replica_to_client_connection(stream, server, client_address, store, state).await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;

@@ -4,6 +4,7 @@ use tokio::sync::{Mutex, mpsc};
 use crate::{
     commands::{
         command_error::CommandError,
+        command_handler::CommandResult,
         stream_utils::{parse_stream_entries_to_resp, validate_stream_id},
     },
     key_value_store::{DataType, KeyValueStore, Stream},
@@ -153,24 +154,31 @@ pub async fn xread(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let xread_arguments = XreadArguments::parse(arguments)?;
 
     let parsed_stream_ids =
         match parse_stream_ids(Arc::clone(&store), xread_arguments.key_stream_pairs).await {
             Ok(ids) => ids,
-            Err(CommandError::DataNotFound) => return Ok(RespValue::Array(Vec::new()).encode()),
+            Err(CommandError::DataNotFound) => {
+                return Ok(CommandResult::Response(
+                    RespValue::Array(Vec::new()).encode(),
+                ));
+            }
             Err(e) => return Err(e),
         };
 
     let Some(blocking_duration_ms) = xread_arguments.blocking_duration else {
-        return read_streams(store, parsed_stream_ids).await;
+        match read_streams(store, parsed_stream_ids).await {
+            Ok(response) => return Ok(CommandResult::Response(response)),
+            Err(e) => return Err(e),
+        }
     };
 
     let direct_call_response = read_streams(Arc::clone(&store), parsed_stream_ids.clone()).await?;
 
     if direct_call_response != RespValue::Array(Vec::new()).encode() {
-        return Ok(direct_call_response);
+        return Ok(CommandResult::Response(direct_call_response));
     }
 
     let (sender, mut receiver) = mpsc::channel(32);
@@ -186,8 +194,11 @@ pub async fn xread(
     remove_subscribers(state, &parsed_stream_ids, &client_address).await;
 
     match result {
-        Some(_) => read_streams(store, parsed_stream_ids).await,
-        None => Ok(RespValue::NullBulkString.encode()),
+        Some(_) => match read_streams(store, parsed_stream_ids).await {
+            Ok(response) => return Ok(CommandResult::Response(response)),
+            Err(e) => return Err(e),
+        },
+        None => Ok(CommandResult::Response(RespValue::NullBulkString.encode())),
     }
 }
 

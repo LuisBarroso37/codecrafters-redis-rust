@@ -1,5 +1,4 @@
 mod blpop;
-mod command_dispatcher;
 mod echo;
 mod get;
 mod incr;
@@ -13,6 +12,7 @@ mod psync;
 mod replconf;
 mod rpush;
 mod set;
+mod transaction;
 mod type_command;
 mod xadd;
 mod xrange;

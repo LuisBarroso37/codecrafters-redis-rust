@@ -7,7 +7,11 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
+use crate::{
+    commands::{CommandError, command_handler::CommandResult},
+    resp::RespValue,
+    server::RedisServer,
+};
 
 enum ReplconfConfiguration {
     ListeningPort,
@@ -107,25 +111,27 @@ pub async fn replconf(
     client_address: &str,
     server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let replconf_arguments = ReplconfArguments::parse(arguments)?;
 
     match replconf_arguments.configuration {
-        ReplconfConfiguration::ListeningPort => {
-            Ok(RespValue::SimpleString("OK".to_string()).encode())
-        }
-        ReplconfConfiguration::Capabilities => {
-            Ok(RespValue::SimpleString("OK".to_string()).encode())
-        }
+        ReplconfConfiguration::ListeningPort => Ok(CommandResult::Response(
+            RespValue::SimpleString("OK".to_string()).encode(),
+        )),
+        ReplconfConfiguration::Capabilities => Ok(CommandResult::Response(
+            RespValue::SimpleString("OK".to_string()).encode(),
+        )),
         ReplconfConfiguration::GetAck => {
             let server_guard = server.read().await;
 
-            Ok(RespValue::Array(vec![
-                RespValue::BulkString("REPLCONF".to_string()),
-                RespValue::BulkString("ACK".to_string()),
-                RespValue::BulkString(server_guard.repl_offset.to_string()),
-            ])
-            .encode())
+            Ok(CommandResult::Response(
+                RespValue::Array(vec![
+                    RespValue::BulkString("REPLCONF".to_string()),
+                    RespValue::BulkString("ACK".to_string()),
+                    RespValue::BulkString(server_guard.repl_offset.to_string()),
+                ])
+                .encode(),
+            ))
         }
         ReplconfConfiguration::Ack(offset) => {
             let mut server_guard = server.write().await;
@@ -136,8 +142,7 @@ pub async fn replconf(
                 }
             }
 
-            // Return empty string for Ack, caller should not send a response
-            Ok(String::new())
+            Ok(CommandResult::NoResponse)
         }
     }
 }

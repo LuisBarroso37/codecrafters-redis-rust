@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::{Mutex, oneshot};
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore},
     resp::RespValue,
     state::{BlpopSubscriber, State},
@@ -118,16 +118,15 @@ pub async fn blpop(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let blpop_arguments = BlpopArguments::parse(arguments)?;
 
     if let Some(value) =
         remove_first_element_from_list(Arc::clone(&store), &blpop_arguments.key).await
     {
-        return Ok(RespValue::encode_array_from_strings(vec![
-            blpop_arguments.key,
-            value,
-        ]));
+        return Ok(CommandResult::Response(
+            RespValue::encode_array_from_strings(vec![blpop_arguments.key, value]),
+        ));
     }
 
     let (sender, mut receiver) = oneshot::channel();
@@ -143,16 +142,15 @@ pub async fn blpop(
     remove_subscriber(state, &blpop_arguments.key, &client_address).await;
 
     if data.is_none() {
-        return Ok(RespValue::NullBulkString.encode());
+        return Ok(CommandResult::Response(RespValue::NullBulkString.encode()));
     }
 
     if let Some(value) = remove_first_element_from_list(store, &blpop_arguments.key).await {
-        Ok(RespValue::encode_array_from_strings(vec![
-            blpop_arguments.key,
-            value,
-        ]))
+        Ok(CommandResult::Response(
+            RespValue::encode_array_from_strings(vec![blpop_arguments.key, value]),
+        ))
     } else {
-        Ok(RespValue::NullBulkString.encode())
+        Ok(CommandResult::Response(RespValue::NullBulkString.encode()))
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore},
     resp::RespValue,
 };
@@ -129,17 +129,17 @@ impl LpopArguments {
 pub async fn lpop(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let lpop_arguments = LpopArguments::parse(arguments)?;
 
     let mut store_guard = store.lock().await;
 
     let Some(value) = store_guard.get_mut(&lpop_arguments.key) else {
-        return Ok(RespValue::NullBulkString.encode());
+        return Ok(CommandResult::Response(RespValue::NullBulkString.encode()));
     };
 
     let DataType::Array(ref mut list) = value.data else {
-        return Ok(RespValue::NullBulkString.encode());
+        return Ok(CommandResult::Response(RespValue::NullBulkString.encode()));
     };
 
     let mut vec = Vec::new();
@@ -151,8 +151,12 @@ pub async fn lpop(
     }
 
     match vec.len() {
-        0 => Ok(RespValue::NullBulkString.encode()),
-        1 => Ok(RespValue::BulkString(vec[0].clone()).encode()),
-        _ => Ok(RespValue::encode_array_from_strings(vec)),
+        0 => Ok(CommandResult::Response(RespValue::NullBulkString.encode())),
+        1 => Ok(CommandResult::Response(
+            RespValue::BulkString(vec[0].clone()).encode(),
+        )),
+        _ => Ok(CommandResult::Response(
+            RespValue::encode_array_from_strings(vec),
+        )),
     }
 }

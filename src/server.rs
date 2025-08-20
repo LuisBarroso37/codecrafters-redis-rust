@@ -9,15 +9,17 @@ use std::{collections::HashMap, sync::Arc};
 use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{Mutex, RwLock},
 };
 
-use crate::connection::handle_master_connection;
+use crate::connection::{handle_master_to_replica_connection, handle_replica_to_client_connection};
 use crate::input::handshake;
-use crate::{connection::handle_client_connection, state::State};
+use crate::resp::RespValue;
+use crate::{connection::handle_master_to_client_connection, state::State};
 
 /// Errors that can occur during command-line argument parsing and server setup.
 #[derive(Error, Debug, PartialEq, Clone)]
@@ -172,30 +174,32 @@ impl RedisServer {
         })
     }
 
-    /// Runs the Redis server, handling connections and replication.
-    ///
-    /// This is the main server loop that:
-    /// - For replica servers: Connects to the master, performs handshake, and processes replication
-    /// - For master servers: Listens for client connections and handles them concurrently
-    ///
-    /// The method runs indefinitely until the process is terminated or a fatal error occurs.
-    ///
-    /// # Behavior
-    ///
-    /// ## Master Mode
-    /// - Binds to the configured port and listens for TCP connections
-    /// - Spawns a new async task for each client connection
-    /// - Manages replica connections and forwards write commands to them
-    ///
-    /// ## Replica Mode
-    /// - Connects to the specified master server
-    /// - Performs the Redis replication handshake (PING, REPLCONF, PSYNC)
-    /// - Receives and applies commands from the master
-    /// - Also listens for client connections to serve read-only requests
-    ///
-    /// # Panics
-    ///
-    /// May panic if critical system resources (like TCP listeners) cannot be created.
+    pub async fn update_replication_offset(&mut self, input: RespValue) {
+        self.repl_offset += input.encode().as_bytes().len();
+    }
+
+    pub async fn should_replicate_write_command(
+        &self,
+        input: RespValue,
+        command_name: &str,
+    ) -> tokio::io::Result<()> {
+        if !self.write_commands.contains(&command_name) {
+            return Ok(());
+        }
+
+        if let Some(ref replicas) = self.replicas {
+            for replica in replicas.values() {
+                let mut replica_writer_guard = replica.writer.write().await;
+                replica_writer_guard
+                    .write_all(input.encode().as_bytes())
+                    .await?;
+                replica_writer_guard.flush().await?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn run(&self) {
         let store = Arc::new(Mutex::new(HashMap::new()));
         let state = Arc::new(Mutex::new(State::new()));
@@ -223,7 +227,7 @@ impl RedisServer {
                 };
 
                 tokio::spawn(async move {
-                    handle_master_connection(
+                    handle_master_to_replica_connection(
                         &master_address,
                         &mut stream,
                         server_clone,
@@ -252,14 +256,33 @@ impl RedisServer {
                     let state_clone = Arc::clone(&state);
 
                     tokio::spawn(async move {
-                        handle_client_connection(
-                            stream,
-                            server_clone,
-                            client_address.to_string(),
-                            store_clone,
-                            state_clone,
-                        )
-                        .await;
+                        let role = {
+                            let server_guard = server_clone.read().await;
+                            server_guard.role.clone()
+                        };
+
+                        match role {
+                            RedisRole::Master => {
+                                handle_master_to_client_connection(
+                                    stream,
+                                    server_clone,
+                                    client_address.to_string(),
+                                    store_clone,
+                                    state_clone,
+                                )
+                                .await
+                            }
+                            RedisRole::Replica(_) => {
+                                handle_replica_to_client_connection(
+                                    stream,
+                                    server_clone,
+                                    client_address.to_string(),
+                                    store_clone,
+                                    state_clone,
+                                )
+                                .await;
+                            }
+                        }
                     });
                 }
                 Err(e) => {

@@ -1,14 +1,14 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use codecrafters_redis::{
-    commands::{CommandDispatcher, CommandError, CommandHandler, DispatchError, DispatchResult},
+    commands::{CommandError, CommandHandler, CommandResult, run_transaction_commands},
     input::read_and_parse_resp,
     key_value_store::KeyValueStore,
     resp::RespValue,
     server::{RedisRole, RedisServer},
     state::State,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, task::JoinHandle};
 use tokio::{
     net::TcpStream,
     sync::{Mutex, RwLock},
@@ -87,11 +87,11 @@ impl TestEnv {
         &mut self,
         command: RespValue,
         client_address: &str,
-    ) -> Result<String, CommandError> {
-        let command_handler = CommandHandler::new(&command)?;
+    ) -> Result<CommandResult, CommandError> {
+        let command_handler = CommandHandler::new(command)?;
 
         command_handler
-            .handle_command(
+            .handle_command_for_master_server(
                 Arc::clone(&self.server),
                 client_address,
                 Arc::clone(&self.store),
@@ -101,18 +101,30 @@ impl TestEnv {
     }
 
     /// Execute a command and assert it succeeds with expected result
-    pub async fn exec_command_ok(
+    pub async fn exec_command_immediate_success_response(
         &mut self,
         command: RespValue,
         client_address: &str,
-        expected: &str,
+        expected_response: &str,
     ) {
         let result = self.exec_command(command, client_address).await;
-        assert_eq!(result, Ok(expected.to_string()));
+        assert!(result.is_ok());
+
+        let command_result = result.unwrap();
+
+        match command_result {
+            CommandResult::Response(resp) => {
+                assert_eq!(resp, expected_response.to_string());
+            }
+            CommandResult::Sync(resp) => {
+                assert_eq!(resp, expected_response.to_string());
+            }
+            _ => panic!("Expected response, got something else"),
+        }
     }
 
     /// Execute a command and assert it fails
-    pub async fn exec_command_err(
+    pub async fn exec_command_immediate_error_response(
         &mut self,
         command: RespValue,
         client_address: &str,
@@ -120,101 +132,62 @@ impl TestEnv {
     ) {
         let result = self.exec_command(command, client_address).await;
         assert!(result.is_err());
-        assert_eq!(result, Err(expected_error));
+
+        let command_error = result.unwrap_err();
+        assert_eq!(command_error, expected_error);
     }
 
-    /// Execute a transaction command and return the result
-    async fn exec_transaction_command(
+    /// Check queued commands queued in transaction and assert they are the expected commands
+    pub async fn exec_command_transaction_expected_commands(
         &mut self,
-        command: CommandHandler,
         client_address: &str,
-    ) -> Result<DispatchResult, DispatchError> {
-        let command_dispatcher = CommandDispatcher::new(client_address, Arc::clone(&self.state));
-
-        command_dispatcher.dispatch_command(command).await
-    }
-
-    /// Execute a transaction command and assert it succeeds with an immediate response
-    pub async fn exec_transaction_immediate_response(
-        &mut self,
-        command: RespValue,
-        client_address: &str,
-        expected: &str,
+        expected_commands: &[CommandHandler],
     ) {
-        let command_handler = CommandHandler::new(&command).unwrap();
         let result = self
-            .exec_transaction_command(command_handler, client_address)
+            .exec_command(TestUtils::exec_command(), client_address)
             .await;
         assert!(result.is_ok());
 
-        match result.unwrap() {
-            DispatchResult::ImmediateResponse(resp) => {
-                assert_eq!(resp, expected.to_string());
+        let command_result = result.unwrap();
+
+        match command_result {
+            CommandResult::Batch(commands) => {
+                assert_eq!(commands, expected_commands);
             }
-            _ => panic!("Expected immediate response"),
+            _ => panic!("Expected batch command response, got something else"),
         }
     }
 
-    /// Execute a transaction command and assert it returns the expected commands
-    pub async fn exec_transaction_expected_commands(
+    /// Execute commands queued in transaction and assert it succeeds with expected result
+    pub async fn exec_command_transaction_success_response(
         &mut self,
-        command: RespValue,
         client_address: &str,
-        expected: &[CommandHandler],
+        expected_response: &str,
     ) {
-        let command_handler = CommandHandler::new(&command).unwrap();
         let result = self
-            .exec_transaction_command(command_handler, client_address)
+            .exec_command(TestUtils::exec_command(), client_address)
             .await;
         assert!(result.is_ok());
 
-        match result.unwrap() {
-            DispatchResult::ExecuteTransactionCommands(commands) => {
-                assert_eq!(commands, expected);
+        let command_result = result.unwrap();
+
+        match command_result {
+            CommandResult::Batch(commands) => {
+                let result = run_transaction_commands(
+                    client_address,
+                    Arc::clone(&self.server),
+                    Arc::clone(&self.store),
+                    Arc::clone(&self.state),
+                    commands,
+                )
+                .await;
+                assert!(result.is_ok());
+                let response = result.unwrap();
+
+                assert_eq!(response, expected_response.to_string());
             }
-            _ => panic!("Expected commands, got something else"),
+            _ => panic!("Expected batch command response, got something else"),
         }
-    }
-
-    /// Execute a transaction command and assert it fails
-    pub async fn exec_transaction_err(
-        &mut self,
-        command: RespValue,
-        client_address: &str,
-        expected_error: DispatchError,
-    ) {
-        let command_handler = CommandHandler::new(&command).unwrap();
-        let result = self
-            .exec_transaction_command(command_handler, client_address)
-            .await;
-        assert_eq!(result.is_err(), true);
-        assert_eq!(result, Err(expected_error));
-    }
-
-    /// Execute queued transaction commands and assert it returns the expected response
-    pub async fn exec_transaction_execute_commands(
-        &mut self,
-        command: RespValue,
-        client_address: &str,
-        expected: String,
-    ) {
-        let command_handler = CommandHandler::new(&command).unwrap();
-        let result = self
-            .exec_transaction_command(command_handler, client_address)
-            .await;
-        assert!(result.is_ok());
-
-        let response = result
-            .unwrap()
-            .handle_dispatch_result(
-                Arc::clone(&self.server),
-                client_address,
-                Arc::clone(&self.store),
-                Arc::clone(&self.state),
-            )
-            .await;
-
-        assert_eq!(response.0, expected);
     }
 
     /// Get a reference to the store for inspection
@@ -501,16 +474,16 @@ impl TestUtils {
         key: &str,
         timeout_seconds: &str,
         client_address: &str,
-    ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
+    ) -> JoinHandle<Result<CommandResult, CommandError>> {
         let (store_clone, state_clone, server_clone) = env.clone_env();
         let blpop_command = Self::blpop_command(key, timeout_seconds);
         let client_address = client_address.to_string();
 
         tokio::spawn(async move {
-            let command_handler = CommandHandler::new(&blpop_command)?;
+            let command_handler = CommandHandler::new(blpop_command)?;
 
             command_handler
-                .handle_command(
+                .handle_command_for_master_server(
                     Arc::clone(&server_clone),
                     &client_address,
                     Arc::clone(&store_clone),
@@ -527,17 +500,17 @@ impl TestUtils {
         stream_ids: &[&str],
         timeout_milliseconds: &str,
         client_address: &str,
-    ) -> tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>> {
+    ) -> JoinHandle<Result<CommandResult, CommandError>> {
         let (store_clone, state_clone, server_clone) = env.clone_env();
         let xread_blocking_command =
             Self::xread_blocking_command(timeout_milliseconds, keys, stream_ids);
         let client_address = client_address.to_string();
 
         tokio::spawn(async move {
-            let command_handler = CommandHandler::new(&xread_blocking_command)?;
+            let command_handler = CommandHandler::new(xread_blocking_command)?;
 
             command_handler
-                .handle_command(
+                .handle_command_for_master_server(
                     Arc::clone(&server_clone),
                     &client_address,
                     Arc::clone(&store_clone),
@@ -549,13 +522,20 @@ impl TestUtils {
 
     /// Wait for a task with timeout and expect it to complete (success or failure)
     pub async fn wait_for_completion(
-        task: tokio::task::JoinHandle<Result<String, codecrafters_redis::commands::CommandError>>,
+        task: JoinHandle<Result<CommandResult, CommandError>>,
         timeout_duration: Duration,
-    ) -> Result<String, codecrafters_redis::commands::CommandError> {
-        timeout(timeout_duration, task)
+    ) -> Result<String, CommandError> {
+        match timeout(timeout_duration, task)
             .await
             .expect("Task should complete within timeout")
             .expect("Task should not panic")
+        {
+            Ok(result) => match result {
+                CommandResult::Response(value) => Ok(value),
+                _ => panic!("Unexpected command result"),
+            },
+            Err(err) => Err(err),
+        }
     }
 
     /// Create expected bulk string response
@@ -594,7 +574,7 @@ impl TestUtils {
 
     /// Filter successful results containing a specific substring
     pub fn filter_successful_results_containing<'a>(
-        results: &'a [Result<String, codecrafters_redis::commands::CommandError>],
+        results: &'a [Result<String, CommandError>],
         substring: &str,
     ) -> Vec<&'a String> {
         results

@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
+use crate::{
+    commands::{CommandError, command_handler::CommandResult},
+    resp::RespValue,
+    server::RedisServer,
+};
 
 enum InfoSection {
     DEFAULT,
@@ -37,7 +41,7 @@ impl InfoArguments {
 pub async fn info(
     server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let info_arguments = InfoArguments::parse(arguments)?;
 
     let server_guard = server.read().await;
@@ -55,7 +59,11 @@ pub async fn info(
     }
 
     match info_arguments.section {
-        InfoSection::DEFAULT => Ok(RespValue::BulkString(replication.join("\r\n")).encode()),
-        InfoSection::REPLICATION => Ok(RespValue::BulkString(replication.join("\r\n")).encode()),
+        InfoSection::DEFAULT => Ok(CommandResult::Response(
+            RespValue::BulkString(replication.join("\r\n")).encode(),
+        )),
+        InfoSection::REPLICATION => Ok(CommandResult::Response(
+            RespValue::BulkString(replication.join("\r\n")).encode(),
+        )),
     }
 }

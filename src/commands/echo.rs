@@ -1,4 +1,7 @@
-use crate::{commands::command_error::CommandError, resp::RespValue};
+use crate::{
+    commands::{command_error::CommandError, command_handler::CommandResult},
+    resp::RespValue,
+};
 
 /// Represents the parsed arguments for ECHO command
 pub struct EchoArguments {
@@ -63,8 +66,10 @@ impl EchoArguments {
 /// let result = echo(vec!["hello world".to_string()]);
 /// // Returns: "$11\r\nhello world\r\n"
 /// ```
-pub fn echo(arguments: Vec<String>) -> Result<String, CommandError> {
+pub fn echo(arguments: Vec<String>) -> Result<CommandResult, CommandError> {
     let echo_arguments = EchoArguments::parse(arguments)?;
 
-    Ok(RespValue::BulkString(echo_arguments.argument).encode())
+    Ok(CommandResult::Response(
+        RespValue::BulkString(echo_arguments.argument).encode(),
+    ))
 }

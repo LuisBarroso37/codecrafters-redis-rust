@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::{sync::Mutex, time::Instant};
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
 };
@@ -77,24 +77,26 @@ impl GetArguments {
 pub async fn get(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let get_arguments = GetArguments::parse(arguments)?;
 
     let mut store_guard = store.lock().await;
     let stored_data = store_guard.get(&get_arguments.key);
 
     let Some(value) = stored_data else {
-        return Ok(RespValue::NullBulkString.encode());
+        return Ok(CommandResult::Response(RespValue::NullBulkString.encode()));
     };
 
     if is_value_expired(&value) {
         store_guard.remove(&get_arguments.key);
-        return Ok(RespValue::NullBulkString.encode());
+        return Ok(CommandResult::Response(RespValue::NullBulkString.encode()));
     }
 
     match value.data {
-        DataType::String(ref s) => Ok(RespValue::BulkString(s.clone()).encode()),
-        _ => Ok(RespValue::NullBulkString.encode()),
+        DataType::String(ref s) => Ok(CommandResult::Response(
+            RespValue::BulkString(s.clone()).encode(),
+        )),
+        _ => Ok(CommandResult::Response(RespValue::NullBulkString.encode())),
     }
 }
 

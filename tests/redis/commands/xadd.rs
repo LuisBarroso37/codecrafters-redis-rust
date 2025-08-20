@@ -12,7 +12,7 @@ async fn test_handle_xadd_command() {
     let mut env = TestEnv::new_master_server();
     let stream_id = "1526919030474-0";
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xadd_command(
             "fruits",
             stream_id,
@@ -45,14 +45,14 @@ async fn test_handle_xadd_command_invalid_data_type() {
     let mut env = TestEnv::new_master_server();
     let stream_id = "1526919030474-0";
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("fruits", "mango"),
         &TestUtils::client_address(41844),
         &&TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::xadd_command(
             "fruits",
             stream_id,
@@ -95,7 +95,11 @@ async fn test_handle_xadd_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }

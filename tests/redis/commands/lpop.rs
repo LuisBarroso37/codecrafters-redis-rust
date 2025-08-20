@@ -11,7 +11,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_lpop_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
@@ -33,7 +33,7 @@ async fn test_handle_lpop_command() {
     );
     drop(store_guard);
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpop_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("mango"),
@@ -58,7 +58,7 @@ async fn test_handle_lpop_command() {
 async fn test_handle_lpop_command_invalid() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["LPOP"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidLPopCommand,
@@ -70,7 +70,7 @@ async fn test_handle_lpop_command_invalid() {
 async fn test_handle_lpop_command_not_found() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpop_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_null(),
@@ -82,14 +82,14 @@ async fn test_handle_lpop_command_not_found() {
 async fn test_handle_lpop_command_wrong_data_type() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grape", "mango"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpop_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_null(),
@@ -101,7 +101,7 @@ async fn test_handle_lpop_command_wrong_data_type() {
 async fn test_handle_lpop_command_multiple_elements() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
@@ -123,7 +123,7 @@ async fn test_handle_lpop_command_multiple_elements() {
     );
     drop(store_guard);
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpop_command_multiple_items("grape", 2),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&["mango", "raspberry"]),

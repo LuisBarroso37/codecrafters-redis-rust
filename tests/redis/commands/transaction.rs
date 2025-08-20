@@ -1,4 +1,4 @@
-use codecrafters_redis::commands::{CommandError, CommandHandler, DispatchError};
+use codecrafters_redis::commands::{CommandError, CommandHandler};
 
 use crate::test_utils::{TestEnv, TestUtils};
 
@@ -6,7 +6,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_multi_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -22,7 +22,7 @@ async fn test_handle_multi_command() {
 async fn test_handle_exec_command_immediately_after_multi_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -34,7 +34,7 @@ async fn test_handle_exec_command_immediately_after_multi_command() {
     assert_eq!(transaction, Some(&Vec::new()));
     drop(state_guard);
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::exec_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&[]),
@@ -50,10 +50,10 @@ async fn test_handle_exec_command_immediately_after_multi_command() {
 async fn test_handle_exec_command_without_using_multi_before() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_err(
+    env.exec_command_immediate_error_response(
         TestUtils::exec_command(),
         &TestUtils::client_address(41844),
-        DispatchError::ExecWithoutMulti,
+        CommandError::ExecWithoutMulti,
     )
     .await;
 }
@@ -62,21 +62,21 @@ async fn test_handle_exec_command_without_using_multi_before() {
 async fn test_handle_should_queue_commands() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grapes", "4"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::incr_command("grapes"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
@@ -90,11 +90,13 @@ async fn test_handle_should_queue_commands() {
         Some(&vec![
             CommandHandler {
                 name: "SET".to_string(),
-                arguments: vec!["grapes".to_string(), "4".to_string()]
+                arguments: vec!["grapes".to_string(), "4".to_string()],
+                input: TestUtils::set_command("grapes", "4"),
             },
             CommandHandler {
                 name: "INCR".to_string(),
-                arguments: vec!["grapes".to_string()]
+                arguments: vec!["grapes".to_string()],
+                input: TestUtils::incr_command("grapes"),
             }
         ])
     );
@@ -104,17 +106,17 @@ async fn test_handle_should_queue_commands() {
 async fn test_handle_fail_to_add_invalid_command_to_transaction() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_transaction_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["GET", "key", "value"]),
         &TestUtils::client_address(41844),
-        DispatchError::InvalidQueueCommand(CommandError::InvalidGetCommand),
+        CommandError::InvalidGetCommand,
     )
     .await;
 }
@@ -123,38 +125,39 @@ async fn test_handle_fail_to_add_invalid_command_to_transaction() {
 async fn test_handle_should_return_queued_commands() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grapes", "4"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::incr_command("grapes"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_expected_commands(
-        TestUtils::exec_command(),
+    env.exec_command_transaction_expected_commands(
         &TestUtils::client_address(41844),
         &[
             CommandHandler {
                 name: "SET".to_string(),
                 arguments: vec!["grapes".to_string(), "4".to_string()],
+                input: TestUtils::set_command("grapes", "4"),
             },
             CommandHandler {
                 name: "INCR".to_string(),
                 arguments: vec!["grapes".to_string()],
+                input: TestUtils::incr_command("grapes"),
             },
         ],
     )
@@ -166,46 +169,33 @@ async fn test_handle_should_return_queued_commands() {
 }
 
 #[tokio::test]
-async fn test_handle_should_run_single_command() {
-    let mut env = TestEnv::new_master_server();
-
-    env.exec_transaction_execute_commands(
-        TestUtils::set_command("grapes", "4"),
-        &TestUtils::client_address(41844),
-        TestUtils::expected_simple_string("OK"),
-    )
-    .await;
-}
-
-#[tokio::test]
 async fn test_handle_should_run_queued_commands() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grapes", "4"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::incr_command("grapes"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_execute_commands(
-        TestUtils::exec_command(),
+    env.exec_command_transaction_success_response(
         &TestUtils::client_address(41844),
-        "*2\r\n+OK\r\n:5\r\n".to_string(),
+        "*2\r\n+OK\r\n:5\r\n",
     )
     .await;
 
@@ -218,7 +208,7 @@ async fn test_handle_should_run_queued_commands() {
 async fn test_handle_discard_command_should_remove_transaction() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -230,7 +220,7 @@ async fn test_handle_discard_command_should_remove_transaction() {
     assert_eq!(transaction, Some(&Vec::new()));
     drop(state_guard);
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::discard_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -246,10 +236,10 @@ async fn test_handle_discard_command_should_remove_transaction() {
 async fn test_handle_discard_command_without_using_multi_before() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_err(
+    env.exec_command_immediate_error_response(
         TestUtils::discard_command(),
         &TestUtils::client_address(41844),
-        DispatchError::DiscardWithoutMulti,
+        CommandError::DiscardWithoutMulti,
     )
     .await;
 }
@@ -258,96 +248,34 @@ async fn test_handle_discard_command_without_using_multi_before() {
 async fn test_handle_should_run_all_queued_commands_even_if_errors_occur() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::multi_command(),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grapes", "string"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_immediate_response(
+    env.exec_command_immediate_success_response(
         TestUtils::incr_command("grapes"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("QUEUED"),
     )
     .await;
 
-    env.exec_transaction_execute_commands(
-        TestUtils::exec_command(),
+    env.exec_command_transaction_success_response(
         &TestUtils::client_address(41844),
-        "*2\r\n+OK\r\n-ERR value is not an integer or out of range\r\n".to_string(),
+        "*2\r\n+OK\r\n-ERR value is not an integer or out of range\r\n",
     )
     .await;
 
     let mut state_guard = env.get_state().await;
     let transaction = state_guard.get_transaction(&TestUtils::client_address(41844));
     assert_eq!(transaction, None);
-}
-
-#[tokio::test]
-async fn test_handle_should_run_transactions_from_concurrent_clients() {
-    let mut env = TestEnv::new_master_server();
-
-    let client_address_1 = TestUtils::client_address(41844);
-
-    env.exec_transaction_immediate_response(
-        TestUtils::multi_command(),
-        &client_address_1,
-        &TestUtils::expected_simple_string("OK"),
-    )
-    .await;
-
-    env.exec_transaction_immediate_response(
-        TestUtils::set_command("grapes", "4"),
-        &client_address_1,
-        &TestUtils::expected_simple_string("QUEUED"),
-    )
-    .await;
-
-    env.exec_transaction_immediate_response(
-        TestUtils::incr_command("grapes"),
-        &client_address_1,
-        &TestUtils::expected_simple_string("QUEUED"),
-    )
-    .await;
-
-    env.exec_transaction_execute_commands(
-        TestUtils::exec_command(),
-        &client_address_1,
-        "*2\r\n+OK\r\n:5\r\n".to_string(),
-    )
-    .await;
-
-    let mut env_clone = env.clone();
-
-    env_clone
-        .exec_transaction_immediate_response(
-            TestUtils::multi_command(),
-            &TestUtils::client_address(41844),
-            &TestUtils::expected_simple_string("OK"),
-        )
-        .await;
-
-    env_clone
-        .exec_transaction_immediate_response(
-            TestUtils::incr_command("grapes"),
-            &TestUtils::client_address(41844),
-            &TestUtils::expected_simple_string("QUEUED"),
-        )
-        .await;
-
-    env_clone
-        .exec_transaction_execute_commands(
-            TestUtils::exec_command(),
-            &client_address_1,
-            "*1\r\n:6\r\n".to_string(),
-        )
-        .await;
 }

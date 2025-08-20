@@ -12,14 +12,14 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_get_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grape", "mango"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::get_command("grape"),
         &TestUtils::client_address(41845),
         &TestUtils::expected_bulk_string("mango"),
@@ -44,14 +44,14 @@ async fn test_handle_get_command_with_expiration() {
 
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command_with_expiration("grape", "mango", 100),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::get_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string("mango"),
@@ -71,7 +71,7 @@ async fn test_handle_get_command_with_expiration() {
 
     tokio::time::advance(Duration::from_millis(200)).await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::get_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_null(),
@@ -99,8 +99,12 @@ async fn test_handle_get_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }
 
@@ -108,7 +112,7 @@ async fn test_handle_get_command_invalid() {
 async fn test_handle_get_command_not_found() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::get_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_null(),

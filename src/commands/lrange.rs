@@ -3,7 +3,7 @@ use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore},
     resp::RespValue,
 };
@@ -106,17 +106,21 @@ impl LrangeArguments {
 pub async fn lrange(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let lrange_arguments = LrangeArguments::parse(arguments)?;
 
     let store_guard = store.lock().await;
 
     let Some(value) = store_guard.get(&lrange_arguments.key) else {
-        return Ok(RespValue::Array(Vec::new()).encode());
+        return Ok(CommandResult::Response(
+            RespValue::Array(Vec::new()).encode(),
+        ));
     };
 
     let DataType::Array(ref list) = value.data else {
-        return Ok(RespValue::Array(Vec::new()).encode());
+        return Ok(CommandResult::Response(
+            RespValue::Array(Vec::new()).encode(),
+        ));
     };
 
     let Ok((start, end)) = validate_range_indexes(
@@ -124,7 +128,9 @@ pub async fn lrange(
         lrange_arguments.start_index,
         lrange_arguments.end_index,
     ) else {
-        return Ok(RespValue::Array(Vec::new()).encode());
+        return Ok(CommandResult::Response(
+            RespValue::Array(Vec::new()).encode(),
+        ));
     };
 
     let range = list
@@ -133,9 +139,13 @@ pub async fn lrange(
         .collect::<Vec<String>>();
 
     if !range.is_empty() {
-        return Ok(RespValue::encode_array_from_strings(range));
+        return Ok(CommandResult::Response(
+            RespValue::encode_array_from_strings(range),
+        ));
     } else {
-        return Ok(RespValue::Array(Vec::new()).encode());
+        return Ok(CommandResult::Response(
+            RespValue::Array(Vec::new()).encode(),
+        ));
     }
 }
 

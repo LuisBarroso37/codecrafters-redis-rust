@@ -8,14 +8,14 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_blpop_command_direct_response() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::blpop_command("grape", "0"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_bulk_string_array(&["grape", "mango"]),
@@ -38,7 +38,7 @@ async fn test_blpop_concurrent_clients_simple_blocking() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::rpush_command("test_list", &["item1"]),
             &TestUtils::client_address(12347),
             &TestUtils::expected_integer(1),
@@ -62,7 +62,7 @@ async fn test_blpop_concurrent_clients_simple_blocking() {
 async fn test_blpop_concurrent_clients_first_come_first_served() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("test_queue", &["single_item"]),
         &TestUtils::client_address(12340),
         &TestUtils::expected_integer(1),
@@ -111,7 +111,7 @@ async fn test_blpop_timeout_behavior() {
 
     // Client tries BLPOP with timeout on empty list
     // Should timeout and return null
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::blpop_command("empty_list", "1"),
         &TestUtils::client_address(12350),
         &TestUtils::expected_null(),
@@ -144,7 +144,7 @@ async fn test_blpop_zero_timeout_infinite_wait() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::rpush_command("infinite_list", &["unblock_item"]),
             &TestUtils::client_address(12352),
             &TestUtils::expected_integer(1),
@@ -187,7 +187,7 @@ async fn test_blpop_multiple_pushes_multiple_clients() {
         let client_addr = format!("127.0.0.1:1237{}", i);
 
         env_mut
-            .exec_command_ok(
+            .exec_command_immediate_success_response(
                 TestUtils::rpush_command("multi_queue", &[format!("item_{}", i).as_str()]),
                 &client_addr,
                 &TestUtils::expected_integer(1),
@@ -230,7 +230,7 @@ async fn test_blpop_with_existing_items_concurrent() {
     let mut env = TestEnv::new_master_server();
 
     // Pre-populate the list with multiple items
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("existing_queue", &["existing1", "existing2", "existing3"]),
         &TestUtils::client_address(12380),
         &TestUtils::expected_integer(3),
@@ -267,7 +267,7 @@ async fn test_blpop_with_existing_items_concurrent() {
     let mut env_mut = env.clone();
 
     env_mut
-        .exec_command_ok(
+        .exec_command_immediate_success_response(
             TestUtils::llen_command("existing_queue"),
             &TestUtils::client_address(12390),
             &TestUtils::expected_integer(0),
@@ -279,14 +279,14 @@ async fn test_blpop_with_existing_items_concurrent() {
 async fn test_blpop_invalid_arguments() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["BLPOP", "test_list"]),
         &TestUtils::client_address(12400),
         CommandError::InvalidBLPopCommand,
     )
     .await;
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::blpop_command("test_list", "invalid"),
         &TestUtils::client_address(12401),
         CommandError::InvalidBLPopCommandArgument,
@@ -318,7 +318,7 @@ async fn test_blpop_concurrent_different_keys() {
         let key_name = format!("queue_{}", i);
         let server_port = 12420 + i;
 
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::rpush_command(&key_name, &[format!("value_{}", i).as_str()]),
             &TestUtils::client_address(server_port),
             &TestUtils::expected_integer(1),
@@ -361,7 +361,11 @@ async fn test_handle_blpop_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }

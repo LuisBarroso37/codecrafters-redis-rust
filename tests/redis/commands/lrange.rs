@@ -6,7 +6,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_lrange_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command(
             "grape",
             &["mango", "raspberry", "apple", "banana", "kiwi", "pear"],
@@ -33,7 +33,7 @@ async fn test_handle_lrange_command() {
     ];
 
     for (command, expected_response) in test_cases {
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             command,
             &TestUtils::client_address(41844),
             expected_response,
@@ -58,7 +58,11 @@ async fn test_handle_lrange_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }

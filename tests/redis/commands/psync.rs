@@ -22,8 +22,12 @@ async fn test_handle_psync_command() {
     ];
 
     for (command, response) in test_cases {
-        env.exec_command_ok(command, &TestUtils::client_address(41844), &response)
-            .await;
+        env.exec_command_immediate_success_response(
+            command,
+            &TestUtils::client_address(41844),
+            &response,
+        )
+        .await;
     }
 }
 
@@ -31,7 +35,7 @@ async fn test_handle_psync_command() {
 async fn test_handle_psync_command_replication_id_does_not_match() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["PSYNC", "59211996145553b6fd49a914e49210391ac94854", "0"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidPsyncReplicationId,
@@ -43,7 +47,7 @@ async fn test_handle_psync_command_replication_id_does_not_match() {
 async fn test_handle_psync_command_invalid() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&[
             "PSYNC",
             "59211996145553b6fd49a914e49210391ac94854",

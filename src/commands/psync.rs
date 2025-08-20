@@ -7,7 +7,11 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
+use crate::{
+    commands::{CommandError, command_handler::CommandResult},
+    resp::RespValue,
+    server::RedisServer,
+};
 
 /// Represents the parsed arguments for the PSYNC command.
 ///
@@ -77,7 +81,7 @@ impl PsyncArguments {
 pub async fn psync(
     server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let psync_arguments = PsyncArguments::parse(arguments)?;
 
     let server_guard = server.read().await;
@@ -93,9 +97,11 @@ pub async fn psync(
         }
     };
 
-    Ok(RespValue::SimpleString(format!(
-        "FULLRESYNC {} {}",
-        master_repl_id, server_guard.repl_offset
+    Ok(CommandResult::Sync(
+        RespValue::SimpleString(format!(
+            "FULLRESYNC {} {}",
+            master_repl_id, server_guard.repl_offset
+        ))
+        .encode(),
     ))
-    .encode())
 }

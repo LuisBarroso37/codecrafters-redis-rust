@@ -11,7 +11,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_rpush_command_insert() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
         "127.0.0.1:41844",
         &TestUtils::expected_integer(3),
@@ -37,7 +37,7 @@ async fn test_handle_rpush_command_insert() {
 async fn test_handle_rpush_command_update() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
@@ -59,7 +59,7 @@ async fn test_handle_rpush_command_update() {
     );
     drop(store);
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["pear"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(4),
@@ -86,7 +86,7 @@ async fn test_handle_rpush_command_update() {
 async fn test_handle_rpush_command_invalid() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["RPUSH", "mango"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidRPushCommand,

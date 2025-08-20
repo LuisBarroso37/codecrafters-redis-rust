@@ -12,7 +12,7 @@ async fn test_handle_xrange_command() {
         for j in 0..=3 {
             let stream_id = format!("{}-{}", &first_stream_id_part, j);
 
-            env.exec_command_ok(
+            env.exec_command_immediate_success_response(
                 TestUtils::xadd_command(
                     "fruits",
                     &stream_id,
@@ -80,7 +80,7 @@ async fn test_handle_xrange_command() {
     ];
 
     for (start_stream_id, end_stream_id, expected_response) in test_cases {
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xrange_command("fruits", start_stream_id, end_stream_id),
             &TestUtils::client_address(41844),
             expected_response,
@@ -96,7 +96,7 @@ async fn test_handle_xrange_command_data_not_found() {
     for i in 0..=1 {
         let stream_id = format!("1526919030404-{}", i);
 
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 &stream_id,
@@ -108,7 +108,7 @@ async fn test_handle_xrange_command_data_not_found() {
         .await;
     }
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::xrange_command("fruits", "1526919030424-0", "1526919030424-2"),
         &TestUtils::client_address(41844),
         "*0\r\n",
@@ -120,14 +120,14 @@ async fn test_handle_xrange_command_data_not_found() {
 async fn test_handle_xrange_command_invalid_data_type() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("fruit", "mango"),
         &TestUtils::client_address(41844),
         &&TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::xrange_command("fruit", "1526919030424-0", "1526919030424-2"),
         &TestUtils::client_address(41844),
         CommandError::InvalidDataTypeForKey,
@@ -142,7 +142,7 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
     for i in 0..=1 {
         let stream_id = format!("1526919030404-{}", i);
 
-        env.exec_command_ok(
+        env.exec_command_immediate_success_response(
             TestUtils::xadd_command(
                 "fruits",
                 &stream_id,
@@ -154,7 +154,7 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
         .await;
     }
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::xrange_command("fruits", "0-0", "0-2"),
         &TestUtils::client_address(41844),
         CommandError::InvalidStreamId("Stream ID must be greater than 0-0".to_string()),
@@ -166,7 +166,7 @@ async fn test_handle_xrange_command_zero_zero_forbidden() {
 async fn test_handle_xrange_command_key_not_found() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::xrange_command("fruits", "1526919030424-0", "1526919030424-2"),
         &TestUtils::client_address(41844),
         CommandError::DataNotFound,
@@ -196,7 +196,11 @@ async fn test_handle_xrange_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }

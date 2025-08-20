@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time::Instant};
 
 use crate::{
-    commands::command_error::CommandError,
+    commands::{command_error::CommandError, command_handler::CommandResult},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
 };
@@ -142,7 +142,7 @@ impl SetArguments {
 pub async fn set(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let set_arguments = SetArguments::parse(arguments)?;
 
     let mut store_guard = store.lock().await;
@@ -154,5 +154,7 @@ pub async fn set(
         },
     );
 
-    Ok(RespValue::SimpleString("OK".to_string()).encode())
+    Ok(CommandResult::Response(
+        RespValue::SimpleString("OK".to_string()).encode(),
+    ))
 }

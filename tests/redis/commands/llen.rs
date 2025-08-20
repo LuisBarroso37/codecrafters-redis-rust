@@ -6,14 +6,14 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_llen_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::rpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::llen_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
@@ -25,7 +25,7 @@ async fn test_handle_llen_command() {
 async fn test_handle_llen_command_not_found() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::llen_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(0),
@@ -37,14 +37,14 @@ async fn test_handle_llen_command_not_found() {
 async fn test_handle_llen_command_wrong_data_type() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grape", "mango"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
     )
     .await;
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::llen_command("grape"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(0),
@@ -68,7 +68,11 @@ async fn test_handle_llen_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }

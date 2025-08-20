@@ -22,8 +22,12 @@ async fn test_handle_replconf_command() {
     ];
 
     for (command, response) in test_cases {
-        env.exec_command_ok(command, &TestUtils::client_address(41844), &response)
-            .await;
+        env.exec_command_immediate_success_response(
+            command,
+            &TestUtils::client_address(41844),
+            &response,
+        )
+        .await;
     }
 }
 
@@ -55,7 +59,11 @@ async fn test_handle_replconf_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }

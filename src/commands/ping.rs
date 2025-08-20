@@ -1,4 +1,7 @@
-use crate::{commands::command_error::CommandError, resp::RespValue};
+use crate::{
+    commands::{command_error::CommandError, command_handler::CommandResult},
+    resp::RespValue,
+};
 
 pub struct PingArguments;
 
@@ -62,8 +65,10 @@ impl PingArguments {
 /// let result = ping(vec![]);
 /// // Returns: "+PONG\r\n"
 /// ```
-pub fn ping(arguments: Vec<String>) -> Result<String, CommandError> {
+pub fn ping(arguments: Vec<String>) -> Result<CommandResult, CommandError> {
     PingArguments::parse(arguments)?;
 
-    return Ok(RespValue::SimpleString("PONG".to_string()).encode());
+    return Ok(CommandResult::Response(
+        RespValue::SimpleString("PONG".to_string()).encode(),
+    ));
 }

@@ -1,18 +1,4 @@
-//! Redis command implementations.
-//!
-//! This module contains the implementation of all Redis commands supported by the server.
-//! Each command is implemented in its own module with consistent patterns for:
-//!
-//! - Argument parsing and validation
-//! - Command execution logic  
-//! - Response formatting
-//! - Error handling
-//!
-//! The module also provides the command dispatcher system that routes parsed commands
-//! to their appropriate handlers and manages the execution pipeline.
-
 mod blpop;
-mod command_dispatcher;
 mod command_error;
 mod command_handler;
 mod echo;
@@ -28,16 +14,15 @@ mod replconf;
 mod rpush_and_lpush;
 mod set;
 mod stream_utils;
+mod transactions;
 mod type_command;
 mod wait;
 mod xadd;
 mod xrange;
 mod xread;
 
-pub use command_dispatcher::{
-    CommandDispatcher, DispatchError, DispatchResult, handle_extra_action,
-};
 pub use command_error::CommandError;
-pub use command_handler::CommandHandler;
+pub use command_handler::{CommandHandler, CommandResult};
 pub use stream_utils::validate_stream_id;
+pub use transactions::run_transaction_commands;
 pub use xread::is_xread_stream_id_after;

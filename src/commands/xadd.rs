@@ -7,7 +7,7 @@ use std::{
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::{command_error::CommandError, validate_stream_id},
+    commands::{command_error::CommandError, command_handler::CommandResult, validate_stream_id},
     key_value_store::{DataType, KeyValueStore, Value},
     resp::RespValue,
     state::State,
@@ -102,7 +102,7 @@ pub async fn xadd(
     store: Arc<Mutex<KeyValueStore>>,
     state: Arc<Mutex<State>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let xadd_arguments = XaddArguments::parse(arguments)?;
 
     let validated_stream_id = validate_stream_id_against_store(
@@ -143,7 +143,9 @@ pub async fn xadd(
     let mut state_guard = state.lock().await;
     state_guard.send_to_xread_subscribers(&xadd_arguments.key, &validated_stream_id, true)?;
 
-    Ok(RespValue::BulkString(validated_stream_id).encode())
+    Ok(CommandResult::Response(
+        RespValue::BulkString(validated_stream_id).encode(),
+    ))
 }
 
 /// Validates and generates a stream ID for use in XADD operations.

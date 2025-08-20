@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 use crate::{
     commands::{
         command_error::CommandError,
+        command_handler::CommandResult,
         stream_utils::{parse_stream_entries_to_resp, validate_stream_id},
     },
     key_value_store::{DataType, KeyValueStore, Stream},
@@ -108,7 +109,7 @@ impl XrangeArguments {
 pub async fn xrange(
     store: Arc<Mutex<KeyValueStore>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let xrange_arguments = XrangeArguments::parse(arguments)?;
 
     let store_guard = store.lock().await;
@@ -124,11 +125,15 @@ pub async fn xrange(
     let Some(start_stream_id) =
         validate_start_stream_id(stream, &xrange_arguments.start_stream_id)?
     else {
-        return Ok(RespValue::Array(Vec::with_capacity(0)).encode());
+        return Ok(CommandResult::Response(
+            RespValue::Array(Vec::new()).encode(),
+        ));
     };
     let Some(end_stream_id) = validate_end_stream_id(stream, &xrange_arguments.end_stream_id)?
     else {
-        return Ok(RespValue::Array(Vec::with_capacity(0)).encode());
+        return Ok(CommandResult::Response(
+            RespValue::Array(Vec::new()).encode(),
+        ));
     };
 
     let entries = stream
@@ -145,7 +150,7 @@ pub async fn xrange(
         .collect::<Vec<(&String, &Stream)>>();
 
     let resp_value = parse_stream_entries_to_resp(entries);
-    return Ok(resp_value.encode());
+    return Ok(CommandResult::Response(resp_value.encode()));
 }
 
 /// Validates and resolves the start stream ID for XRANGE operations.

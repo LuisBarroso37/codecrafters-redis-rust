@@ -11,7 +11,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_lpush_command_insert() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
@@ -37,7 +37,7 @@ async fn test_handle_lpush_command_insert() {
 async fn test_handle_lpush_command_update() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpush_command("grape", &["mango", "raspberry", "apple"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(3),
@@ -59,7 +59,7 @@ async fn test_handle_lpush_command_update() {
     );
     drop(store_guard);
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::lpush_command("grape", &["pear"]),
         &TestUtils::client_address(41844),
         &TestUtils::expected_integer(4),
@@ -86,7 +86,7 @@ async fn test_handle_lpush_command_update() {
 async fn test_handle_lpush_command_invalid() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_err(
+    env.exec_command_immediate_error_response(
         TestUtils::invalid_command(&["LPUSH", "grape"]),
         &TestUtils::client_address(41844),
         CommandError::InvalidLPushCommand,

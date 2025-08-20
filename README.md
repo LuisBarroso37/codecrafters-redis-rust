@@ -1,41 +1,16 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/9627d861-885a-445a-893e-a4d3b2ca7414)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+## Warnings
 
-This is a starting point for Rust solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+- Setting TCP_NODELAY no the sockets seems to do nothing. Commands are still grouped together if sent in quick succession.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+## Things to check or still to be implemented
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
-
-# Passing the first stage
-
-The entry point for your Redis implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
-
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
-
-That's all!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.88)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
-
-## Run codecrafters tests without pushing code to github
-
-codecrafters test
+- Should we be able to call WAIT commands during a transaction?
+- Should the replica be able to respond to read commands from the master server?
+- Should master server be able to handle PSYNC commands?
+- Can we run PSYNC and REPLCONF within a transaction?
+- Which commands besides the write commands should update the replication offset?
+- After sending the FULLRESYNC response to the replica, how exactly does Redis do the streaming of the RDB file? At the moment in the code, the RDB file is sent in the same response as the FULLRESYNC
+- Do we need 2 separate offset counters for the replicas? One for all processed commands coming from the master server and one for only the write commands? Otherwise the offset counting does not really work as it should
 
 ## Run specific integration test with info logs
 

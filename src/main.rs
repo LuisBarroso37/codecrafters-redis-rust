@@ -4,10 +4,10 @@ mod commands;
 mod connection;
 mod input;
 mod key_value_store;
+mod rdb;
 mod resp;
 mod server;
 mod state;
-
 /// Main entry point for the Redis server implementation.
 ///
 /// Sets up a TCP server listening on port 6379 (standard Redis port) and handles

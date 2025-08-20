@@ -3,6 +3,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio::{sync::RwLock, time::timeout};
 
+use crate::commands::command_handler::CommandResult;
 use crate::{commands::CommandError, resp::RespValue, server::RedisServer};
 
 pub struct WaitArguments {
@@ -39,7 +40,7 @@ impl WaitArguments {
 pub async fn wait(
     server: Arc<RwLock<RedisServer>>,
     arguments: Vec<String>,
-) -> Result<String, CommandError> {
+) -> Result<CommandResult, CommandError> {
     let wait_arguments = WaitArguments::parse(arguments)?;
 
     let response = match wait_arguments.timeout_ms {
@@ -65,7 +66,9 @@ pub async fn wait(
     }?;
     // Return number of replicas that processed commands before timeout or until it matches given argument
 
-    Ok(RespValue::Integer(response as i64).encode())
+    Ok(CommandResult::Response(
+        RespValue::Integer(response as i64).encode(),
+    ))
 }
 
 async fn check_if_replica_processed_commands(

@@ -12,7 +12,7 @@ use crate::test_utils::{TestEnv, TestUtils};
 async fn test_handle_set_command() {
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command("grape", "mango"),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -37,7 +37,7 @@ async fn test_handle_set_command_with_expiration() {
 
     let mut env = TestEnv::new_master_server();
 
-    env.exec_command_ok(
+    env.exec_command_immediate_success_response(
         TestUtils::set_command_with_expiration("grape", "mango", 100),
         &TestUtils::client_address(41844),
         &TestUtils::expected_simple_string("OK"),
@@ -80,7 +80,11 @@ async fn test_handle_set_command_invalid() {
     ];
 
     for (command, expected_error) in test_cases {
-        env.exec_command_err(command, &TestUtils::client_address(41844), expected_error)
-            .await;
+        env.exec_command_immediate_error_response(
+            command,
+            &TestUtils::client_address(41844),
+            expected_error,
+        )
+        .await;
     }
 }
