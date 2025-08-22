@@ -92,6 +92,10 @@ pub enum CommandError {
     InvalidWaitCommandForReplica,
     #[error("replica can only process read commands from clients")]
     ReplicaReadOnlyCommands,
+    #[error("invalid CONFIG GET command")]
+    InvalidConfigGetCommand,
+    #[error("invalid CONFIG GET command argument")]
+    InvalidConfigGetCommandArgument,
 }
 
 impl CommandError {
@@ -228,6 +232,12 @@ impl CommandError {
                 "ERR replica can only process read commands from clients".to_string(),
             )
             .encode(),
+            CommandError::InvalidConfigGetCommand => {
+                RespValue::Error("ERR Invalid CONFIG GET command".to_string()).encode()
+            }
+            CommandError::InvalidConfigGetCommandArgument => {
+                RespValue::Error("ERR Invalid CONFIG GET command argument".to_string()).encode()
+            }
         }
     }
 }

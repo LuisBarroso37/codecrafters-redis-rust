@@ -38,6 +38,8 @@ impl TestEnv {
                 repl_offset: 0,
                 replicas: Some(HashMap::new()),
                 write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"],
+                rdb_directory: "/tmp/redis-files".to_string(),
+                rdb_filename: "dump.rdb".to_string(),
             })),
         }
     }
@@ -54,6 +56,8 @@ impl TestEnv {
                 repl_offset: 0,
                 replicas: None,
                 write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"],
+                rdb_directory: "/tmp/redis-files".to_string(),
+                rdb_filename: "dump.rdb".to_string(),
             })),
         }
     }
@@ -450,6 +454,20 @@ impl TestUtils {
             RespValue::BulkString(number_of_replicas.to_string()),
             RespValue::BulkString(timeout_ms.to_string()),
         ])
+    }
+
+    /// Create a CONFIG GET command
+    pub fn config_get_command(keys: &[&str]) -> RespValue {
+        let mut vec = vec![
+            RespValue::BulkString("CONFIG".to_string()),
+            RespValue::BulkString("GET".to_string()),
+        ];
+
+        for key in keys {
+            vec.push(RespValue::BulkString(key.to_string()));
+        }
+
+        RespValue::Array(vec)
     }
 
     /// Create an invalid command

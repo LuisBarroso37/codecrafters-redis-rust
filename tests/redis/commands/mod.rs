@@ -1,4 +1,5 @@
 mod blpop;
+mod config_get;
 mod echo;
 mod get;
 mod incr;

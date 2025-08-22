@@ -6,6 +6,7 @@ use crate::{
     commands::{
         blpop::{BlpopArguments, blpop},
         command_error::CommandError,
+        config_get::{ConfigGetArguments, config_get},
         echo::{EchoArguments, echo},
         get::{GetArguments, get},
         incr::{IncrArguments, incr},
@@ -14,13 +15,11 @@ use crate::{
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
         ping::{PingArguments, ping},
-        psync::{PsyncArguments, psync},
-        replconf::{ReplconfArguments, replconf},
+        replication::{PsyncArguments, ReplconfArguments, WaitArguments, psync, replconf, wait},
         rpush_and_lpush::{PushArrayOperations, lpush, rpush},
         set::{SetArguments, set},
         transactions::{DiscardArguments, ExecArguments, MultiArguments, discard, exec, multi},
         type_command::{TypeArguments, type_command},
-        wait::{WaitArguments, wait},
         xadd::{XaddArguments, xadd},
         xrange::{XrangeArguments, xrange},
         xread::{XreadArguments, xread},
@@ -53,17 +52,34 @@ impl CommandHandler {
         };
 
         let name = match elements.get(0) {
-            Some(RespValue::BulkString(s)) => Ok(s.to_string().to_uppercase()),
-            _ => Err(CommandError::InvalidCommandArgument),
-        }?;
+            Some(RespValue::BulkString(s)) => s.to_uppercase(),
+            _ => return Err(CommandError::InvalidCommandArgument),
+        };
+
+        let (name, rest_of_data) = match name.as_str() {
+            "CONFIG" => {
+                let sub_command = match elements.get(1) {
+                    Some(RespValue::BulkString(s)) => s.to_uppercase(),
+                    _ => return Err(CommandError::InvalidCommandArgument),
+                };
+
+                if sub_command == "GET" {
+                    ("CONFIG GET".to_string(), elements[2..].to_vec())
+                } else {
+                    return Err(CommandError::InvalidCommandArgument);
+                }
+            }
+            _ => (name, elements[1..].to_vec()),
+        };
 
         let mut arguments: Vec<String> = Vec::new();
 
-        for element in elements[1..].iter() {
+        for element in rest_of_data {
             let arg = match element {
                 RespValue::BulkString(s) => Ok(s.to_string()),
                 _ => Err(CommandError::InvalidCommand),
             }?;
+
             arguments.push(arg);
         }
 
@@ -98,6 +114,7 @@ impl CommandHandler {
             "REPLCONF" => ReplconfArguments::parse(self.arguments.clone()).err(),
             "PSYNC" => PsyncArguments::parse(self.arguments.clone()).err(),
             "WAIT" => WaitArguments::parse(self.arguments.clone()).err(),
+            "CONFIG GET" => ConfigGetArguments::parse(self.arguments.clone()).err(),
             _ => Some(CommandError::InvalidCommand),
         }
     }
@@ -216,6 +233,7 @@ impl CommandHandler {
             "REPLCONF" => replconf(client_address, server, self.arguments.clone()).await,
             "PSYNC" => psync(server, self.arguments.clone()).await,
             "WAIT" => wait(server, self.arguments.clone()).await,
+            "CONFIG GET" => config_get(server, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }
