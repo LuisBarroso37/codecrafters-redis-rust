@@ -11,6 +11,7 @@ use crate::{
         get::{GetArguments, get},
         incr::{IncrArguments, incr},
         info::{InfoArguments, info},
+        keys::{KeysArguments, keys},
         llen::{LlenArguments, llen},
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
@@ -115,6 +116,7 @@ impl CommandHandler {
             "PSYNC" => PsyncArguments::parse(self.arguments.clone()).err(),
             "WAIT" => WaitArguments::parse(self.arguments.clone()).err(),
             "CONFIG GET" => ConfigGetArguments::parse(self.arguments.clone()).err(),
+            "KEYS" => KeysArguments::parse(self.arguments.clone()).err(),
             _ => Some(CommandError::InvalidCommand),
         }
     }
@@ -234,6 +236,7 @@ impl CommandHandler {
             "PSYNC" => psync(server, self.arguments.clone()).await,
             "WAIT" => wait(server, self.arguments.clone()).await,
             "CONFIG GET" => config_get(server, self.arguments.clone()).await,
+            "KEYS" => keys(store, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }

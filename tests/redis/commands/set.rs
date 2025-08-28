@@ -4,7 +4,7 @@ use codecrafters_redis::{
     commands::CommandError,
     key_value_store::{DataType, Value},
 };
-use tokio::time::Instant;
+use jiff::{Timestamp, ToSpan, Unit};
 
 use crate::test_utils::{TestEnv, TestUtils};
 
@@ -32,10 +32,8 @@ async fn test_handle_set_command() {
 
 #[tokio::test]
 async fn test_handle_set_command_with_expiration() {
-    tokio::time::pause();
-    let now = Instant::now();
-
     let mut env = TestEnv::new_master_server();
+    let now = Timestamp::now().round(Unit::Millisecond).unwrap();
 
     env.exec_command_immediate_success_response(
         TestUtils::set_command_with_expiration("grape", "mango", 100),
@@ -44,15 +42,25 @@ async fn test_handle_set_command_with_expiration() {
     )
     .await;
 
-    // Verify the value was stored correctly with expiration
     let store_guard = env.get_store().await;
     let value = store_guard.get("grape");
-    assert_eq!(
-        value,
-        Some(&Value {
-            data: DataType::String("mango".to_string()),
-            expiration: Some(now + Duration::from_millis(100)),
-        })
+    assert!(value.is_some());
+
+    let value = value.unwrap();
+    assert_eq!(value.data, DataType::String("mango".to_string()));
+    assert!(value.expiration.is_some());
+
+    // We have to do this due to sometimes the execution timing causing a 1 millisecond difference
+    let expiration = value.expiration.unwrap();
+    let expected = now.checked_add(Duration::from_millis(100)).unwrap();
+    let actual = expiration.round(Unit::Millisecond).unwrap();
+    let cmp = (actual - expected).abs().compare(1.millisecond()).unwrap();
+    assert!(
+        cmp == std::cmp::Ordering::Less || cmp == std::cmp::Ordering::Equal,
+        "actual: {:?}, expected: {:?}, diff: {:?}",
+        actual,
+        expected,
+        (actual - expected).abs()
     );
 }
 

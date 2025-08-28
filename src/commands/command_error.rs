@@ -96,6 +96,10 @@ pub enum CommandError {
     InvalidConfigGetCommand,
     #[error("invalid CONFIG GET command argument")]
     InvalidConfigGetCommandArgument,
+    #[error("invalid KEYS command")]
+    InvalidKeysCommand,
+    #[error("invalid GLOB pattern")]
+    InvalidGlobPattern(String),
 }
 
 impl CommandError {
@@ -237,6 +241,12 @@ impl CommandError {
             }
             CommandError::InvalidConfigGetCommandArgument => {
                 RespValue::Error("ERR Invalid CONFIG GET command argument".to_string()).encode()
+            }
+            CommandError::InvalidKeysCommand => {
+                RespValue::Error("ERR Invalid KEYS command".to_string()).encode()
+            }
+            CommandError::InvalidGlobPattern(error) => {
+                RespValue::Error(format!("ERR Invalid GLOB pattern: {}", error)).encode()
             }
         }
     }

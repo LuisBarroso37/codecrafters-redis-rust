@@ -4,9 +4,11 @@ use regex::Regex;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::commands::CommandError;
+use crate::key_value_store::KeyValueStore;
+use crate::rdb::RdbParser;
 use crate::resp::{RespError, RespValue};
 use crate::server::RedisServer;
 
@@ -77,6 +79,7 @@ where
 pub async fn handshake(
     stream: &mut TcpStream,
     server: Arc<RwLock<RedisServer>>,
+    store: Arc<Mutex<KeyValueStore>>,
 ) -> Result<(), CommandReadError> {
     let mut buffer: [u8; 1024] = [0; 1024];
 
@@ -155,7 +158,7 @@ pub async fn handshake(
     }
 
     // Now separately receive the RDB file
-    receive_rdb_file(stream).await?;
+    receive_rdb_file(stream, store).await?;
 
     Ok(())
 }
@@ -203,7 +206,7 @@ async fn send_and_handle_psync_command(
 
     // Read only the FULLRESYNC line, byte by byte to avoid reading RDB data
     let mut line = Vec::new();
-    let mut byte = [0u8; 1];
+    let mut byte: [u8; 1] = [0; 1];
 
     // Read the '+' at the beginning
     stream
@@ -238,10 +241,13 @@ async fn send_and_handle_psync_command(
     Ok(RespValue::SimpleString(fullresync_line))
 }
 
-async fn receive_rdb_file(stream: &mut TcpStream) -> Result<(), CommandReadError> {
+async fn receive_rdb_file(
+    stream: &mut TcpStream,
+    store: Arc<Mutex<KeyValueStore>>,
+) -> Result<(), CommandReadError> {
     // Read the RDB bulk string header ($<size>\r\n)
     let mut size_line = Vec::new();
-    let mut byte = [0u8; 1];
+    let mut byte: [u8; 1] = [0; 1];
 
     loop {
         stream
@@ -269,6 +275,7 @@ async fn receive_rdb_file(stream: &mut TcpStream) -> Result<(), CommandReadError
     // Stream the RDB data in chunks instead of loading all at once
     let mut total_received: usize = 0;
     let mut buffer: [u8; 4096] = [0; 4096]; // 4KB chunks
+    let mut rdb_parser = RdbParser::new();
 
     while total_received < rdb_size {
         let remaining = rdb_size - total_received;
@@ -281,9 +288,13 @@ async fn receive_rdb_file(stream: &mut TcpStream) -> Result<(), CommandReadError
 
         total_received += chunk_size;
 
-        // Optional: Process RDB chunk here if needed
-        // For now, we just consume it
+        rdb_parser
+            .parse(buffer[..chunk_size].to_vec())
+            .map_err(|_| CommandReadError::InvalidResponseFromMaster)?;
     }
+
+    let mut store_guard = store.lock().await;
+    store_guard.extend(rdb_parser.key_value_store);
 
     Ok(())
 }

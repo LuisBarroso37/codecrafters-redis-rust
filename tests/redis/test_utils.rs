@@ -87,7 +87,7 @@ impl TestEnv {
     }
 
     /// Execute a command and return the result
-    async fn exec_command(
+    pub async fn exec_command(
         &mut self,
         command: RespValue,
         client_address: &str,
@@ -470,6 +470,14 @@ impl TestUtils {
         RespValue::Array(vec)
     }
 
+    /// Create a KEYS command
+    pub fn keys_command(pattern: &str) -> RespValue {
+        RespValue::Array(vec![
+            RespValue::BulkString("KEYS".to_string()),
+            RespValue::BulkString(pattern.to_string()),
+        ])
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> RespValue {
         let mut vec = Vec::new();
@@ -602,7 +610,7 @@ impl TestUtils {
             .collect()
     }
 
-    pub async fn send_command_and_receive_master_server(
+    pub async fn send_command_and_receive_response(
         client: &mut TcpStream,
         buffer: &mut [u8; 1024],
         command: RespValue,
@@ -657,6 +665,27 @@ impl TestUtils {
             "redis-server".to_string(),
             "--port".to_string(),
             port.to_string(),
+        ];
+        let master_server = RedisServer::new(master_args).unwrap();
+
+        tokio::spawn(async move {
+            master_server.run().await;
+        });
+    }
+
+    pub async fn run_master_server_with_custom_rdb_file(
+        port: u32,
+        rdb_directory: &str,
+        rdb_filename: &str,
+    ) {
+        let master_args = vec![
+            "redis-server".to_string(),
+            "--port".to_string(),
+            port.to_string(),
+            "--dir".to_string(),
+            rdb_directory.to_string(),
+            "--dbfilename".to_string(),
+            rdb_filename.to_string(),
         ];
         let master_server = RedisServer::new(master_args).unwrap();
 

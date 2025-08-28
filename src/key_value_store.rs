@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-use tokio::time::Instant;
+use jiff::Timestamp;
 
 pub type Stream = BTreeMap<String, String>;
 
@@ -14,7 +14,7 @@ pub enum DataType {
 #[derive(Debug, PartialEq)]
 pub struct Value {
     pub data: DataType,
-    pub expiration: Option<Instant>,
+    pub expiration: Option<Timestamp>,
 }
 
 pub type KeyValueStore = HashMap<String, Value>;

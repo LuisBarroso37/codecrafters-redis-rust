@@ -1,6 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use codecrafters_redis::commands::CommandError;
+use jiff::{SignedDuration, Timestamp};
 
 use crate::test_utils::{TestEnv, TestUtils};
 
@@ -107,7 +108,7 @@ async fn test_blpop_concurrent_clients_first_come_first_served() {
 async fn test_blpop_timeout_behavior() {
     let mut env = TestEnv::new_master_server();
 
-    let start_time = std::time::Instant::now();
+    let start_time = Timestamp::now();
 
     // Client tries BLPOP with timeout on empty list
     // Should timeout and return null
@@ -118,11 +119,11 @@ async fn test_blpop_timeout_behavior() {
     )
     .await;
 
-    let elapsed = start_time.elapsed();
+    let elapsed = Timestamp::now().duration_since(start_time);
 
     // Should take approximately 1 second (allow some tolerance)
-    assert!(elapsed >= Duration::from_millis(900));
-    assert!(elapsed <= Duration::from_millis(1200));
+    assert!(elapsed >= SignedDuration::from_millis(900));
+    assert!(elapsed <= SignedDuration::from_millis(1200));
 }
 
 #[tokio::test]

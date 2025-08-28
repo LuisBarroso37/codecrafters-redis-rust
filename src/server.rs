@@ -12,6 +12,7 @@ use tokio::{
 
 use crate::connection::{handle_master_to_replica_connection, handle_replica_to_client_connection};
 use crate::input::handshake;
+use crate::rdb::parse_rdb_file;
 use crate::resp::RespValue;
 use crate::{connection::handle_master_to_client_connection, state::State};
 
@@ -132,7 +133,7 @@ impl RedisServer {
             repl_offset: 0,
             replicas,
             write_commands: Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"]),
-            rdb_directory: directory_path.unwrap_or("./".to_string()),
+            rdb_directory: directory_path.unwrap_or("./src".to_string()),
             rdb_filename: rdb_filename.unwrap_or("dump.rdb".to_string()),
         })
     }
@@ -168,6 +169,15 @@ impl RedisServer {
         let state = Arc::new(Mutex::new(State::new()));
         let server = Arc::new(RwLock::new(self.clone()));
 
+        if let Err(e) = parse_rdb_file(Arc::clone(&server), Arc::clone(&store)).await {
+            if e.kind() == tokio::io::ErrorKind::NotFound {
+                eprintln!("RDB file not found, proceeding without it");
+            } else {
+                eprintln!("Failed to parse RDB file: {}", e);
+                return;
+            }
+        }
+
         match &self.role {
             RedisRole::Replica((address, port)) => {
                 let master_address = format!("{}:{}", address, port);
@@ -184,7 +194,9 @@ impl RedisServer {
                 let store_clone = Arc::clone(&store);
                 let state_clone = Arc::clone(&state);
 
-                if let Err(e) = handshake(&mut stream, Arc::clone(&server)).await {
+                if let Err(e) =
+                    handshake(&mut stream, Arc::clone(&server), Arc::clone(&store)).await
+                {
                     eprintln!("Failed to perform handshake: {}", e);
                     return;
                 };
@@ -307,7 +319,7 @@ fn validate_master_address(master_address: &str) -> Result<(String, u32), CliErr
 }
 
 fn validate_directory_path(dir: String) -> Result<String, CliError> {
-    let regex = Regex::new(r"^((/[a-zA-Z0-9-_]+)+|/)$").unwrap();
+    let regex = Regex::new(r"^(\/|\.{1,2}|(\.?\.?\/)?[a-zA-Z0-9-_]+(\/[a-zA-Z0-9-_]+)*)$").unwrap();
     if regex.is_match(&dir) {
         Ok(dir)
     } else {
@@ -589,23 +601,7 @@ mod tests {
                 vec![
                     "codecrafters-redis".to_string(),
                     "--dir".to_string(),
-                    "invalid".to_string(),
-                ],
-                CliError::InvalidRdbDirectoryPath,
-            ),
-            (
-                vec![
-                    "codecrafters-redis".to_string(),
-                    "--dir".to_string(),
                     "/tmp.setup/redis".to_string(),
-                ],
-                CliError::InvalidRdbDirectoryPath,
-            ),
-            (
-                vec![
-                    "codecrafters-redis".to_string(),
-                    "--dir".to_string(),
-                    "tmp/redis".to_string(),
                 ],
                 CliError::InvalidRdbDirectoryPath,
             ),
@@ -657,7 +653,7 @@ mod tests {
                 vec!["codecrafters-redis".to_string()],
                 6379,
                 RedisRole::Master,
-                "./",
+                "./src",
                 "dump.rdb",
             ),
             (
@@ -668,7 +664,7 @@ mod tests {
                 ],
                 6677,
                 RedisRole::Master,
-                "./",
+                "./src",
                 "dump.rdb",
             ),
             (
@@ -679,7 +675,7 @@ mod tests {
                 ],
                 6379,
                 RedisRole::Replica(("127.0.0.1".to_string(), 6380)),
-                "./",
+                "./src",
                 "dump.rdb",
             ),
             (
@@ -692,7 +688,7 @@ mod tests {
                 ],
                 7000,
                 RedisRole::Replica(("localhost".to_string(), 6381)),
-                "./",
+                "./src",
                 "dump.rdb",
             ),
             (
@@ -705,7 +701,7 @@ mod tests {
                 ],
                 8000,
                 RedisRole::Replica(("redis-master".to_string(), 6500)),
-                "./",
+                "./src",
                 "dump.rdb",
             ),
             (
@@ -733,12 +729,34 @@ mod tests {
             (
                 vec![
                     "codecrafters-redis".to_string(),
+                    "--dir".to_string(),
+                    "tmp/redis".to_string(),
+                ],
+                6379,
+                RedisRole::Master,
+                "tmp/redis",
+                "dump.rdb",
+            ),
+            (
+                vec![
+                    "codecrafters-redis".to_string(),
+                    "--dir".to_string(),
+                    "redis".to_string(),
+                ],
+                6379,
+                RedisRole::Master,
+                "redis",
+                "dump.rdb",
+            ),
+            (
+                vec![
+                    "codecrafters-redis".to_string(),
                     "--dbfilename".to_string(),
                     "redis.rdb".to_string(),
                 ],
                 6379,
                 RedisRole::Master,
-                "./",
+                "./src",
                 "redis.rdb",
             ),
         ];

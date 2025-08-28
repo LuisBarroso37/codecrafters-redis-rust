@@ -38,7 +38,7 @@ async fn test_handle_master_to_client_connection_basic_commands() {
     let mut client = TcpStream::connect(server_addr).await.unwrap();
     let mut buffer = [0; 1024];
 
-    TestUtils::send_command_and_receive_master_server(
+    TestUtils::send_command_and_receive_response(
         &mut client,
         &mut buffer,
         TestUtils::ping_command(),
@@ -47,7 +47,7 @@ async fn test_handle_master_to_client_connection_basic_commands() {
     .await;
 
     // Test SET command
-    TestUtils::send_command_and_receive_master_server(
+    TestUtils::send_command_and_receive_response(
         &mut client,
         &mut buffer,
         TestUtils::set_command("test_key", "test_value"),
@@ -56,7 +56,7 @@ async fn test_handle_master_to_client_connection_basic_commands() {
     .await;
 
     // Test GET command
-    TestUtils::send_command_and_receive_master_server(
+    TestUtils::send_command_and_receive_response(
         &mut client,
         &mut buffer,
         TestUtils::get_command("test_key"),
@@ -94,7 +94,7 @@ async fn test_handle_replica_to_client_connection_forbidden_write_commands() {
     let mut buffer = [0; 1024];
 
     // Test SET command (should be forbidden on replica)
-    TestUtils::send_command_and_receive_master_server(
+    TestUtils::send_command_and_receive_response(
         &mut client,
         &mut buffer,
         TestUtils::set_command("test_key", "test_value"),
@@ -103,7 +103,7 @@ async fn test_handle_replica_to_client_connection_forbidden_write_commands() {
     .await;
 
     // Test GET command (should work on replica)
-    TestUtils::send_command_and_receive_master_server(
+    TestUtils::send_command_and_receive_response(
         &mut client,
         &mut buffer,
         TestUtils::get_command("nonexistent_key"),

@@ -4,6 +4,7 @@ mod echo;
 mod get;
 mod incr;
 mod info;
+mod keys;
 mod llen;
 mod lpop;
 mod lpush;

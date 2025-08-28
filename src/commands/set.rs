@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use tokio::{sync::Mutex, time::Instant};
+use jiff::Timestamp;
+use tokio::sync::Mutex;
 
 use crate::{
     commands::{command_error::CommandError, command_handler::CommandResult},
@@ -11,7 +12,7 @@ use crate::{
 pub struct SetArguments {
     key: String,
     value: String,
-    expiration: Option<Instant>,
+    expiration: Option<Timestamp>,
 }
 
 impl SetArguments {
@@ -20,7 +21,7 @@ impl SetArguments {
             return Err(CommandError::InvalidSetCommand);
         }
 
-        let mut expiration: Option<Instant> = None;
+        let mut expiration: Option<Timestamp> = None;
 
         if arguments.len() == 4 {
             if arguments[2].to_lowercase() != "px" {
@@ -28,7 +29,10 @@ impl SetArguments {
             }
 
             if let Ok(expiration_time) = arguments[3].parse::<u64>() {
-                expiration = Some(Instant::now() + Duration::from_millis(expiration_time))
+                let timestamp = Timestamp::now()
+                    .checked_add(Duration::from_millis(expiration_time))
+                    .map_err(|_| CommandError::InvalidSetCommandExpiration)?;
+                expiration = Some(timestamp);
             } else {
                 return Err(CommandError::InvalidSetCommandExpiration);
             }

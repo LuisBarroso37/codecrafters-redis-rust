@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use tokio::{sync::Mutex, time::Instant};
+use jiff::Timestamp;
+use tokio::sync::Mutex;
 
 use crate::{
     commands::{command_error::CommandError, command_handler::CommandResult},
@@ -52,7 +53,7 @@ pub async fn get(
 
 fn is_value_expired(value: &Value) -> bool {
     if let Some(expiration) = value.expiration {
-        if Instant::now() > expiration {
+        if Timestamp::now() > expiration {
             return true;
         }
 
@@ -71,9 +72,30 @@ mod tests {
     fn test_is_value_expired() {
         let test_cases = vec![
             (None, false),
-            (Some(Instant::now() + Duration::from_secs(60)), false),
-            (Some(Instant::now() - Duration::from_secs(60)), true),
-            (Some(Instant::now() - Duration::from_millis(1)), true),
+            (
+                Some(
+                    Timestamp::now()
+                        .checked_add(Duration::from_secs(60))
+                        .unwrap(),
+                ),
+                false,
+            ),
+            (
+                Some(
+                    Timestamp::now()
+                        .checked_sub(Duration::from_secs(60))
+                        .unwrap(),
+                ),
+                true,
+            ),
+            (
+                Some(
+                    Timestamp::now()
+                        .checked_sub(Duration::from_millis(1))
+                        .unwrap(),
+                ),
+                true,
+            ),
         ];
 
         for (expiration, expected) in test_cases {

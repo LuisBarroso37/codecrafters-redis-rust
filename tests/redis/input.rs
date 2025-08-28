@@ -129,7 +129,7 @@ async fn test_handshake_success() {
     // Test handshake
     let result = timeout(
         Duration::from_secs(5),
-        handshake(&mut replica_stream, env.server),
+        handshake(&mut replica_stream, env.server, env.store),
     )
     .await;
 
@@ -173,7 +173,7 @@ async fn test_handshake_invalid_pong_response() {
 
     let result = timeout(
         Duration::from_secs(2),
-        handshake(&mut replica_stream, env.server),
+        handshake(&mut replica_stream, env.server, env.store),
     )
     .await;
 
