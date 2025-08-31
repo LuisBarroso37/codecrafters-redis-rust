@@ -19,7 +19,7 @@ use crate::{
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
         ping::{PingArguments, ping},
-        pub_sub::{subscribe, subscribe_ping},
+        pub_sub::{publish, subscribe, subscribe_ping},
         replication::{PsyncArguments, ReplconfArguments, WaitArguments, psync, replconf, wait},
         rpush_and_lpush::{PushArrayOperations, lpush, rpush},
         set::{SetArguments, set},
@@ -173,6 +173,10 @@ impl CommandHandler {
                 } else {
                     Ok(None)
                 }
+            }
+            "PUBLISH" => {
+                let command_result = publish(server, self.arguments.clone()).await?;
+                Ok(Some(command_result))
             }
             _ => Ok(None),
         }

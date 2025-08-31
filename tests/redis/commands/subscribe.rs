@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
 use codecrafters_redis::commands::CommandError;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::RwLock,
-};
 
 use crate::test_utils::{TestEnv, TestUtils};
 
@@ -82,15 +78,7 @@ async fn test_handle_consecutive_subscribe_commands_for_different_channel() {
 #[tokio::test]
 async fn test_handle_subscribe_command_invalid() {
     let mut env = TestEnv::new_master_server();
-    let client_address = &TestUtils::client_address(0);
-    let listener = TcpListener::bind(&client_address).await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = TcpStream::connect(addr).await;
-    });
-    let (tcp_stream, _) = listener.accept().await.unwrap();
-    let (_, writer) = tcp_stream.into_split();
-    let writer = Arc::new(RwLock::new(writer));
+    let (client_address, writer) = TestEnv::new_client_connection().await;
 
     let test_cases = vec![
         (
@@ -106,7 +94,7 @@ async fn test_handle_subscribe_command_invalid() {
     for (command, expected_error) in test_cases {
         env.exec_pub_sub_command_error_response(
             command,
-            client_address,
+            &client_address,
             Arc::clone(&writer),
             expected_error,
         )

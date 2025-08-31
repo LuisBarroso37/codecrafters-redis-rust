@@ -82,7 +82,7 @@ impl TestEnv {
         let (tcp_stream, _) = listener.accept().await.unwrap();
         let (_, writer) = tcp_stream.into_split();
 
-        (client_address.to_string(), Arc::new(RwLock::new(writer)))
+        (addr.to_string(), Arc::new(RwLock::new(writer)))
     }
 
     /// Clone the test environment
@@ -579,6 +579,15 @@ impl TestUtils {
         }
 
         RespValue::Array(vec)
+    }
+
+    /// Create a PUBLISH command
+    pub fn publish_command(channel: &str, message: &str) -> RespValue {
+        RespValue::Array(vec![
+            RespValue::BulkString("PUBLISH".to_string()),
+            RespValue::BulkString(channel.to_string()),
+            RespValue::BulkString(message.to_string()),
+        ])
     }
 
     /// Generate a unique server address for testing

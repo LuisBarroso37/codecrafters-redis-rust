@@ -470,8 +470,8 @@ mod tests {
                     })
                     .unwrap_or(false);
 
-                assert_eq!(
-                    has_subscriber, true,
+                assert!(
+                    has_subscriber,
                     "Subscriber not found for key: {}, stream_id: {}",
                     key, stream_id
                 );

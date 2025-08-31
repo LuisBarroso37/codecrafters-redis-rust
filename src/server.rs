@@ -643,7 +643,7 @@ mod tests {
 
         for (args, expected_error) in test_cases {
             let result = RedisServer::new(args);
-            assert_eq!(result.is_err(), true);
+            assert!(result.is_err());
             assert_eq!(result.unwrap_err(), expected_error);
         }
     }

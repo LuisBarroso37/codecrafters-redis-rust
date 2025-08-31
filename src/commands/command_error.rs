@@ -104,6 +104,10 @@ pub enum CommandError {
     InvalidSubscribeCommand,
     #[error("invalid command in subscribed mode")]
     InvalidCommandInSubscribedMode(String),
+    #[error("invalid PUBLISH command")]
+    InvalidPublishCommand,
+    #[error("error during IO operation")]
+    IoError,
 }
 
 impl CommandError {
@@ -257,6 +261,12 @@ impl CommandError {
             }
             CommandError::InvalidCommandInSubscribedMode(command_name) => {
                 RespValue::Error(format!("ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this subscribed mode", command_name)).encode()
+            }
+            CommandError::InvalidPublishCommand => {
+                RespValue::Error("ERR Invalid PUBLISH command".to_string()).encode()
+            }
+            CommandError::IoError => {
+                RespValue::Error("ERR error during IO operation".to_string()).encode()
             }
         }
     }

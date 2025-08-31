@@ -199,8 +199,8 @@ mod tests {
     #[test]
     fn test_state_new() {
         let state = State::new();
-        assert_eq!(state.blpop_subscribers.is_empty(), true);
-        assert_eq!(state.xread_subscribers.is_empty(), true);
+        assert!(state.blpop_subscribers.is_empty());
+        assert!(state.xread_subscribers.is_empty());
     }
 
     #[test]
@@ -215,7 +215,7 @@ mod tests {
         state.add_blpop_subscriber("mylist".to_string(), subscriber);
 
         assert_eq!(state.blpop_subscribers.len(), 1);
-        assert_eq!(state.blpop_subscribers.contains_key("mylist"), true);
+        assert!(state.blpop_subscribers.contains_key("mylist"));
         assert_eq!(state.blpop_subscribers["mylist"].len(), 1);
     }
 
@@ -274,7 +274,7 @@ mod tests {
 
         state.remove_blpop_subscriber("nonexistent", "127.0.0.1:8080");
 
-        assert_eq!(state.blpop_subscribers.is_empty(), true);
+        assert!(state.blpop_subscribers.is_empty());
     }
 
     #[tokio::test]
@@ -290,7 +290,7 @@ mod tests {
         state.send_to_blpop_subscriber("mylist", true);
 
         let result = receiver.await;
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
         assert_eq!(result.unwrap(), true);
 
         assert_eq!(state.blpop_subscribers.contains_key("mylist"), false);
@@ -302,7 +302,7 @@ mod tests {
 
         state.send_to_blpop_subscriber("nonexistent", true);
 
-        assert_eq!(state.blpop_subscribers.is_empty(), true);
+        assert!(state.blpop_subscribers.is_empty());
     }
 
     #[tokio::test]
@@ -329,7 +329,7 @@ mod tests {
 
         // First subscriber should receive the message
         let result1 = receiver1.await;
-        assert_eq!(result1.is_ok(), true);
+        assert!(result1.is_ok());
         assert_eq!(result1.unwrap(), true);
 
         // Second subscriber should still be waiting
@@ -360,11 +360,8 @@ mod tests {
         state.add_xread_subscriber("mystream".to_string(), "1234-0".to_string(), subscriber);
 
         assert_eq!(state.xread_subscribers.len(), 1);
-        assert_eq!(state.xread_subscribers.contains_key("mystream"), true);
-        assert_eq!(
-            state.xread_subscribers["mystream"].contains_key("1234-0"),
-            true
-        );
+        assert!(state.xread_subscribers.contains_key("mystream"));
+        assert!(state.xread_subscribers["mystream"].contains_key("1234-0"));
         assert_eq!(state.xread_subscribers["mystream"]["1234-0"].len(), 1);
     }
 
@@ -451,7 +448,7 @@ mod tests {
 
         state.remove_xread_subscriber("nonexistent", "1234-0", "127.0.0.1:8080");
 
-        assert_eq!(state.xread_subscribers.is_empty(), true);
+        assert!(state.xread_subscribers.is_empty());
     }
 
     #[tokio::test]
@@ -460,7 +457,7 @@ mod tests {
 
         let result = state.send_to_xread_subscribers("mystream", "invalid-id", true);
 
-        assert_eq!(result.is_err(), true);
+        assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
             CommandError::InvalidStreamId(_)
@@ -473,7 +470,7 @@ mod tests {
 
         let result = state.send_to_xread_subscribers("nonexistent", "1234-0", true);
 
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
@@ -491,15 +488,15 @@ mod tests {
         // Send notification for new entry "1234-0" (which is after "1233-0")
         let result = state.send_to_xread_subscribers("mystream", "1234-0", true);
 
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         // Subscriber should receive notification
         let message = receiver.recv().await;
-        assert_eq!(message.is_some(), true);
+        assert!(message.is_some());
         assert_eq!(message.unwrap(), true);
 
         // Subscriber should be removed after notification
-        assert_eq!(state.xread_subscribers.contains_key("mystream"), false);
+        assert!(!state.xread_subscribers.contains_key("mystream"));
     }
 
     #[tokio::test]
@@ -517,7 +514,7 @@ mod tests {
         // Send notification for new entry "1234-0" (which is before "1235-0")
         let result = state.send_to_xread_subscribers("mystream", "1234-0", true);
 
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         // Subscriber should NOT receive notification
         tokio::select! {
@@ -528,7 +525,7 @@ mod tests {
         }
 
         // Subscriber should still be waiting
-        assert_eq!(state.xread_subscribers.contains_key("mystream"), true);
+        assert!(state.xread_subscribers.contains_key("mystream"));
         assert_eq!(state.xread_subscribers["mystream"]["1235-0"].len(), 1);
     }
 
@@ -553,18 +550,18 @@ mod tests {
         // Send notification for "1234-0" - both should be notified
         let result = state.send_to_xread_subscribers("mystream", "1234-0", true);
 
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         // Both subscribers should receive notifications
         let message1 = receiver1.recv().await;
-        assert_eq!(message1.is_some(), true);
+        assert!(message1.is_some());
         assert_eq!(message1.unwrap(), true);
 
         let message2 = receiver2.recv().await;
-        assert_eq!(message2.is_some(), true);
+        assert!(message2.is_some());
         assert_eq!(message2.unwrap(), true);
 
         // All subscribers should be removed
-        assert_eq!(state.xread_subscribers.contains_key("mystream"), false);
+        assert!(!state.xread_subscribers.contains_key("mystream"));
     }
 }

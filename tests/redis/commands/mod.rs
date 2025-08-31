@@ -12,6 +12,7 @@ mod lrange;
 mod ping;
 mod psync;
 mod replconf;
+mod replication;
 mod rpush;
 mod set;
 mod subscribe;

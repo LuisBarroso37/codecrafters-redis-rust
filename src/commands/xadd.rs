@@ -585,12 +585,12 @@ mod tests {
 
         // Test auto-generation with "*"
         let result = validate_stream_id_against_store(store, "sensor", "*").await;
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         // Should be greater than existing entry
         let generated_id = result.unwrap();
         let parts: Vec<&str> = generated_id.split('-').collect();
         let timestamp: u128 = parts[0].parse().unwrap();
-        assert_eq!(timestamp >= 1526919030474, true);
+        assert!(timestamp >= 1526919030474);
     }
 }
