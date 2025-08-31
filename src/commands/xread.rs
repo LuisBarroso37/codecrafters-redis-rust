@@ -113,7 +113,7 @@ pub async fn xread(
             Ok(response) => return Ok(CommandResult::Response(response)),
             Err(e) => return Err(e),
         },
-        None => Ok(CommandResult::Response(RespValue::NullBulkString.encode())),
+        None => Ok(CommandResult::Response(RespValue::NullArray.encode())),
     }
 }
 

@@ -14,6 +14,7 @@ mod psync;
 mod replconf;
 mod rpush;
 mod set;
+mod subscribe;
 mod transaction;
 mod type_command;
 mod xadd;

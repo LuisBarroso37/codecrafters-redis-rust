@@ -1,14 +1,20 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use codecrafters_redis::{
-    commands::{CommandError, CommandHandler, CommandResult, run_transaction_commands},
+    commands::{
+        CommandError, CommandHandler, CommandResult, run_transaction_commands_for_master_server,
+    },
     input::read_and_parse_resp,
     key_value_store::KeyValueStore,
     resp::RespValue,
     server::{RedisRole, RedisServer},
     state::State,
 };
-use tokio::{io::AsyncWriteExt, task::JoinHandle};
+use tokio::{
+    io::AsyncWriteExt,
+    net::{TcpListener, tcp::OwnedWriteHalf},
+    task::JoinHandle,
+};
 use tokio::{
     net::TcpStream,
     sync::{Mutex, RwLock},
@@ -40,6 +46,7 @@ impl TestEnv {
                 write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"],
                 rdb_directory: "/tmp/redis-files".to_string(),
                 rdb_filename: "dump.rdb".to_string(),
+                pub_sub_channels: HashMap::new(),
             })),
         }
     }
@@ -58,8 +65,24 @@ impl TestEnv {
                 write_commands: vec!["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"],
                 rdb_directory: "/tmp/redis-files".to_string(),
                 rdb_filename: "dump.rdb".to_string(),
+                pub_sub_channels: HashMap::new(),
             })),
         }
+    }
+
+    pub async fn new_client_connection() -> (String, Arc<RwLock<OwnedWriteHalf>>) {
+        let client_address = &TestUtils::client_address(0);
+        let listener = TcpListener::bind(&client_address).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let _ = TcpStream::connect(addr).await;
+        });
+
+        let (tcp_stream, _) = listener.accept().await.unwrap();
+        let (_, writer) = tcp_stream.into_split();
+
+        (client_address.to_string(), Arc::new(RwLock::new(writer)))
     }
 
     /// Clone the test environment
@@ -96,8 +119,8 @@ impl TestEnv {
 
         command_handler
             .handle_command_for_master_server(
+                &client_address,
                 Arc::clone(&self.server),
-                client_address,
                 Arc::clone(&self.store),
                 Arc::clone(&self.state),
             )
@@ -177,7 +200,7 @@ impl TestEnv {
 
         match command_result {
             CommandResult::Batch(commands) => {
-                let result = run_transaction_commands(
+                let result = run_transaction_commands_for_master_server(
                     client_address,
                     Arc::clone(&self.server),
                     Arc::clone(&self.store),
@@ -192,6 +215,64 @@ impl TestEnv {
             }
             _ => panic!("Expected batch command response, got something else"),
         }
+    }
+
+    /// Execute a pub/sub command and return the result
+    async fn exec_pub_sub_command(
+        &mut self,
+        command: RespValue,
+        client_address: &str,
+        writer: Arc<RwLock<OwnedWriteHalf>>,
+    ) -> Result<Option<CommandResult>, CommandError> {
+        let command_handler = CommandHandler::new(command)?;
+
+        command_handler
+            .handle_pub_sub_commands(
+                &client_address,
+                Arc::clone(&writer),
+                Arc::clone(&self.server),
+            )
+            .await
+    }
+
+    /// Execute a pub/sub command and assert it succeeds with expected result
+    pub async fn exec_pub_sub_command_success_response(
+        &mut self,
+        command: RespValue,
+        client_address: &str,
+        writer: Arc<RwLock<OwnedWriteHalf>>,
+        expected_response: &str,
+    ) {
+        let result = self
+            .exec_pub_sub_command(command, client_address, writer)
+            .await;
+        assert!(result.is_ok());
+
+        let command_result = result.unwrap();
+
+        match command_result {
+            Some(CommandResult::Response(resp)) => {
+                assert_eq!(resp, expected_response.to_string());
+            }
+            _ => panic!("Expected response, got something else"),
+        }
+    }
+
+    /// Execute a pub/sub command and assert it fails
+    pub async fn exec_pub_sub_command_error_response(
+        &mut self,
+        command: RespValue,
+        client_address: &str,
+        writer: Arc<RwLock<OwnedWriteHalf>>,
+        expected_error: CommandError,
+    ) {
+        let result = self
+            .exec_pub_sub_command(command, client_address, writer)
+            .await;
+        assert!(result.is_err());
+
+        let command_error = result.unwrap_err();
+        assert_eq!(command_error, expected_error);
     }
 
     /// Get a reference to the store for inspection
@@ -478,6 +559,14 @@ impl TestUtils {
         ])
     }
 
+    /// Create a SUBSCRIBE command
+    pub fn subscribe_command(channel: &str) -> RespValue {
+        RespValue::Array(vec![
+            RespValue::BulkString("SUBSCRIBE".to_string()),
+            RespValue::BulkString(channel.to_string()),
+        ])
+    }
+
     /// Create an invalid command
     pub fn invalid_command(args: &[&str]) -> RespValue {
         let mut vec = Vec::new();
@@ -510,8 +599,8 @@ impl TestUtils {
 
             command_handler
                 .handle_command_for_master_server(
-                    Arc::clone(&server_clone),
                     &client_address,
+                    Arc::clone(&server_clone),
                     Arc::clone(&store_clone),
                     Arc::clone(&state_clone),
                 )
@@ -537,8 +626,8 @@ impl TestUtils {
 
             command_handler
                 .handle_command_for_master_server(
-                    Arc::clone(&server_clone),
                     &client_address,
+                    Arc::clone(&server_clone),
                     Arc::clone(&store_clone),
                     Arc::clone(&state_clone),
                 )

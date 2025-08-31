@@ -63,6 +63,7 @@ pub struct RedisServer {
     pub write_commands: Vec<&'static str>,
     pub rdb_directory: String,
     pub rdb_filename: String,
+    pub pub_sub_channels: HashMap<String, HashMap<String, Arc<RwLock<OwnedWriteHalf>>>>,
 }
 
 impl RedisServer {
@@ -135,6 +136,7 @@ impl RedisServer {
             write_commands: Vec::from(["SET", "RPUSH", "LPUSH", "INCR", "LPOP", "BLPOP", "XADD"]),
             rdb_directory: directory_path.unwrap_or("./src".to_string()),
             rdb_filename: rdb_filename.unwrap_or("dump.rdb".to_string()),
+            pub_sub_channels: HashMap::new(),
         })
     }
 

@@ -7,7 +7,10 @@ use tokio::{
     sync::{Mutex, RwLock},
 };
 
-use crate::commands::{CommandHandler, CommandResult, run_transaction_commands};
+use crate::commands::{
+    CommandHandler, CommandResult, run_transaction_commands_for_master_server,
+    run_transaction_commands_for_replica_server,
+};
 use crate::rdb::stream_rdb_file;
 use crate::resp::RespValue;
 use crate::{
@@ -68,10 +71,51 @@ pub async fn handle_master_to_client_connection(
                 }
             };
 
+            match command_handler
+                .handle_pub_sub_commands(&client_address, Arc::clone(&writer), Arc::clone(&server))
+                .await
+            {
+                Ok(Some(command_result)) => match command_result {
+                    CommandResult::Response(response) => {
+                        if let Err(e) =
+                            thread_safe_write_to_stream(Arc::clone(&writer), response.as_bytes())
+                                .await
+                        {
+                            eprintln!("Error writing to stream: {}", e);
+                        }
+                        continue;
+                    }
+                    _ => {
+                        let error_message =
+                            RespValue::Error("Invalid command result in pub/sub mode".to_string())
+                                .encode();
+                        if let Err(e) = thread_safe_write_to_stream(
+                            Arc::clone(&writer),
+                            error_message.as_bytes(),
+                        )
+                        .await
+                        {
+                            eprintln!("Error writing to stream: {}", e);
+                        }
+                        continue;
+                    }
+                },
+                Ok(None) => (),
+                Err(e) => {
+                    if let Err(e) =
+                        thread_safe_write_to_stream(Arc::clone(&writer), e.as_string().as_bytes())
+                            .await
+                    {
+                        eprintln!("Error writing to stream: {}", e);
+                    }
+                    continue;
+                }
+            };
+
             let command_result = match command_handler
                 .handle_command_for_master_server(
-                    Arc::clone(&server),
                     &client_address,
+                    Arc::clone(&server),
                     Arc::clone(&store),
                     Arc::clone(&state),
                 )
@@ -96,8 +140,8 @@ pub async fn handle_master_to_client_connection(
                         thread_safe_write_to_stream(Arc::clone(&writer), response.as_bytes()).await
                     {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
                 CommandResult::Sync(response) => {
                     if let Err(e) =
@@ -112,43 +156,39 @@ pub async fn handle_master_to_client_connection(
                             .await
                     {
                         eprintln!("Error writing to stream: {}", e);
+                    }
+                    continue;
+                }
+                CommandResult::Batch(commands) => match run_transaction_commands_for_master_server(
+                    &client_address,
+                    Arc::clone(&server),
+                    Arc::clone(&store),
+                    Arc::clone(&state),
+                    commands,
+                )
+                .await
+                {
+                    Ok(response) => {
+                        if let Err(e) =
+                            thread_safe_write_to_stream(Arc::clone(&writer), response.as_bytes())
+                                .await
+                        {
+                            eprintln!("Error writing to stream: {}", e);
+                        }
                         continue;
                     }
-                }
-                CommandResult::Batch(commands) => {
-                    match run_transaction_commands(
-                        &client_address,
-                        Arc::clone(&server),
-                        Arc::clone(&store),
-                        Arc::clone(&state),
-                        commands,
-                    )
-                    .await
-                    {
-                        Ok(response) => {
-                            if let Err(e) = thread_safe_write_to_stream(
-                                Arc::clone(&writer),
-                                response.as_bytes(),
-                            )
-                            .await
-                            {
-                                eprintln!("Error writing to stream: {}", e);
-                                continue;
-                            }
+                    Err(e) => {
+                        if let Err(e) = thread_safe_write_to_stream(
+                            Arc::clone(&writer),
+                            e.as_string().as_bytes(),
+                        )
+                        .await
+                        {
+                            eprintln!("Error writing to stream: {}", e);
                         }
-                        Err(e) => {
-                            if let Err(e) = thread_safe_write_to_stream(
-                                Arc::clone(&writer),
-                                e.as_string().as_bytes(),
-                            )
-                            .await
-                            {
-                                eprintln!("Error writing to stream: {}", e);
-                            }
-                            continue;
-                        }
+                        continue;
                     }
-                }
+                },
             }
         }
     }
@@ -187,8 +227,8 @@ pub async fn handle_master_to_replica_connection(
 
             let command_result = match command_handler
                 .handle_command_for_replica_master_connection(
-                    Arc::clone(&server),
                     master_address,
+                    Arc::clone(&server),
                     Arc::clone(&store),
                     Arc::clone(&state),
                 )
@@ -205,8 +245,8 @@ pub async fn handle_master_to_replica_connection(
                 CommandResult::Response(response) => {
                     if let Err(e) = write_to_stream(stream, response.as_bytes()).await {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
                 CommandResult::Sync(_) => {
                     let error_msg = RespValue::Error(
@@ -216,11 +256,11 @@ pub async fn handle_master_to_replica_connection(
 
                     if let Err(e) = write_to_stream(stream, error_msg.as_bytes()).await {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
                 CommandResult::Batch(commands) => {
-                    if let Err(e) = run_transaction_commands(
+                    if let Err(e) = run_transaction_commands_for_replica_server(
                         &master_address,
                         Arc::clone(&server),
                         Arc::clone(&store),
@@ -230,8 +270,8 @@ pub async fn handle_master_to_replica_connection(
                     .await
                     {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
             }
         }
@@ -283,10 +323,51 @@ pub async fn handle_replica_to_client_connection(
                 }
             };
 
+            match command_handler
+                .handle_pub_sub_commands(&client_address, Arc::clone(&writer), Arc::clone(&server))
+                .await
+            {
+                Ok(Some(command_result)) => match command_result {
+                    CommandResult::Response(response) => {
+                        if let Err(e) =
+                            thread_safe_write_to_stream(Arc::clone(&writer), response.as_bytes())
+                                .await
+                        {
+                            eprintln!("Error writing to stream: {}", e);
+                        }
+                        continue;
+                    }
+                    _ => {
+                        let error_message =
+                            RespValue::Error("Invalid command result in pub/sub mode".to_string())
+                                .encode();
+                        if let Err(e) = thread_safe_write_to_stream(
+                            Arc::clone(&writer),
+                            error_message.as_bytes(),
+                        )
+                        .await
+                        {
+                            eprintln!("Error writing to stream: {}", e);
+                        }
+                        continue;
+                    }
+                },
+                Ok(None) => (),
+                Err(e) => {
+                    if let Err(e) =
+                        thread_safe_write_to_stream(Arc::clone(&writer), e.as_string().as_bytes())
+                            .await
+                    {
+                        eprintln!("Error writing to stream: {}", e);
+                    }
+                    continue;
+                }
+            };
+
             let command_result = match command_handler
                 .handle_command_for_replica_server(
-                    Arc::clone(&server),
                     &client_address,
+                    Arc::clone(&server),
                     Arc::clone(&store),
                     Arc::clone(&state),
                 )
@@ -311,8 +392,8 @@ pub async fn handle_replica_to_client_connection(
                         thread_safe_write_to_stream(Arc::clone(&writer), response.as_bytes()).await
                     {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
                 CommandResult::Sync(_) => {
                     let error_msg = RespValue::Error(
@@ -324,8 +405,8 @@ pub async fn handle_replica_to_client_connection(
                         thread_safe_write_to_stream(Arc::clone(&writer), error_msg.as_bytes()).await
                     {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
                 CommandResult::Batch(_) => {
                     let error_msg = RespValue::Error(
@@ -337,8 +418,8 @@ pub async fn handle_replica_to_client_connection(
                         thread_safe_write_to_stream(Arc::clone(&writer), error_msg.as_bytes()).await
                     {
                         eprintln!("Error writing to stream: {}", e);
-                        continue;
                     }
+                    continue;
                 }
             }
         }

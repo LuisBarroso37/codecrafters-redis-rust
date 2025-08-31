@@ -171,7 +171,7 @@ impl RespValue {
                 format!("$-1\r\n")
             }
             RespValue::NullArray => {
-                format!("*0\r\n")
+                format!("*-1\r\n")
             }
         }
     }

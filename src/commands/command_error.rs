@@ -100,6 +100,10 @@ pub enum CommandError {
     InvalidKeysCommand,
     #[error("invalid GLOB pattern")]
     InvalidGlobPattern(String),
+    #[error("invalid SUBSCRIBE command")]
+    InvalidSubscribeCommand,
+    #[error("invalid command in subscribed mode")]
+    InvalidCommandInSubscribedMode(String),
 }
 
 impl CommandError {
@@ -247,6 +251,12 @@ impl CommandError {
             }
             CommandError::InvalidGlobPattern(error) => {
                 RespValue::Error(format!("ERR Invalid GLOB pattern: {}", error)).encode()
+            }
+            CommandError::InvalidSubscribeCommand => {
+                RespValue::Error("ERR Invalid SUBSCRIBE command".to_string()).encode()
+            }
+            CommandError::InvalidCommandInSubscribedMode(command_name) => {
+                RespValue::Error(format!("ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this subscribed mode", command_name)).encode()
             }
         }
     }

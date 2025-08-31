@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::{
+    net::tcp::OwnedWriteHalf,
+    sync::{Mutex, RwLock},
+};
 
 use crate::{
     commands::{
@@ -16,6 +19,7 @@ use crate::{
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
         ping::{PingArguments, ping},
+        pub_sub::{SubscribeArguments, subscribe},
         replication::{PsyncArguments, ReplconfArguments, WaitArguments, psync, replconf, wait},
         rpush_and_lpush::{PushArrayOperations, lpush, rpush},
         set::{SetArguments, set},
@@ -117,14 +121,101 @@ impl CommandHandler {
             "WAIT" => WaitArguments::parse(self.arguments.clone()).err(),
             "CONFIG GET" => ConfigGetArguments::parse(self.arguments.clone()).err(),
             "KEYS" => KeysArguments::parse(self.arguments.clone()).err(),
+            "SUBSCRIBE" => SubscribeArguments::parse(self.arguments.clone()).err(),
             _ => Some(CommandError::InvalidCommand),
+        }
+    }
+
+    async fn queue_command_if_in_transaction(
+        &self,
+        client_address: &str,
+        state: Arc<Mutex<State>>,
+    ) -> Result<Option<String>, CommandError> {
+        let transaction_commands = Vec::from(["MULTI", "EXEC", "DISCARD"]);
+
+        if transaction_commands.contains(&self.name.as_str()) {
+            return Ok(None);
+        }
+
+        let mut state_guard = state.lock().await;
+
+        let Some(_) = state_guard.get_transaction(&client_address) else {
+            return Ok(None);
+        };
+
+        match self.validate_command_arguments() {
+            Some(err) => return Err(err),
+            None => {
+                state_guard.add_to_transaction(client_address.to_string(), self.clone())?;
+            }
+        }
+
+        Ok(Some(RespValue::SimpleString("QUEUED".to_string()).encode()))
+    }
+
+    pub async fn handle_pub_sub_commands(
+        &self,
+        client_address: &str,
+        writer: Arc<RwLock<OwnedWriteHalf>>,
+        server: Arc<RwLock<RedisServer>>,
+    ) -> Result<Option<CommandResult>, CommandError> {
+        match self.name.as_str() {
+            "SUBSCRIBE" => {
+                let command_result =
+                    subscribe(client_address, writer, server, self.arguments.clone()).await?;
+                Ok(Some(command_result))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    async fn throw_error_if_in_subscribed_mode(
+        &self,
+        client_address: &str,
+        server: Arc<RwLock<RedisServer>>,
+    ) -> Result<(), CommandError> {
+        let pub_sub_commands = Vec::from([
+            "SUBSCRIBE",
+            "UNSUBSCRIBE",
+            "PSUBSCRIBE",
+            "PUNSUBSCRIBE",
+            "SSUBSCRIBE",
+            "SUNSUBSCRIBE",
+            "PING",
+            "RESET",
+            "QUIT",
+        ]);
+        let is_subscribed_mode = {
+            let server_guard = server.read().await;
+            let mut is_subscribed = false;
+
+            for channel in server_guard.pub_sub_channels.values() {
+                if channel.contains_key(client_address) {
+                    is_subscribed = true;
+                }
+            }
+
+            is_subscribed
+        };
+
+        match is_subscribed_mode {
+            true => {
+                if pub_sub_commands.contains(&self.name.as_str()) {
+                    Ok(())
+                } else {
+                    Err(CommandError::InvalidCommandInSubscribedMode(
+                        self.name.clone(),
+                    ))
+                }
+            }
+            false => Ok(()),
         }
     }
 
     async fn handle_command(
         &self,
-        server: Arc<RwLock<RedisServer>>,
         client_address: &str,
+        server: Arc<RwLock<RedisServer>>,
         store: Arc<Mutex<KeyValueStore>>,
         state: Arc<Mutex<State>>,
     ) -> Result<CommandResult, CommandError> {
@@ -231,62 +322,42 @@ impl CommandHandler {
             "MULTI" => multi(client_address, state, self.arguments.clone()).await,
             "EXEC" => exec(client_address, state, self.arguments.clone()).await,
             "DISCARD" => discard(client_address, state, self.arguments.clone()).await,
-            "INFO" => info(server, self.arguments.clone()).await,
-            "REPLCONF" => replconf(client_address, server, self.arguments.clone()).await,
-            "PSYNC" => psync(server, self.arguments.clone()).await,
-            "WAIT" => wait(server, self.arguments.clone()).await,
-            "CONFIG GET" => config_get(server, self.arguments.clone()).await,
+            "INFO" => info(Arc::clone(&server), self.arguments.clone()).await,
+            "REPLCONF" => {
+                replconf(client_address, Arc::clone(&server), self.arguments.clone()).await
+            }
+            "PSYNC" => psync(Arc::clone(&server), self.arguments.clone()).await,
+            "WAIT" => wait(Arc::clone(&server), self.arguments.clone()).await,
+            "CONFIG GET" => config_get(Arc::clone(&server), self.arguments.clone()).await,
             "KEYS" => keys(store, self.arguments.clone()).await,
             _ => Err(CommandError::InvalidCommand),
         }
     }
 
-    async fn queue_command_if_in_transaction(
-        &self,
-        client_address: &str,
-        state: Arc<Mutex<State>>,
-    ) -> Result<Option<String>, CommandError> {
-        let transaction_commands = Vec::from(["MULTI", "EXEC", "DISCARD"]);
-
-        if transaction_commands.contains(&self.name.as_str()) {
-            return Ok(None);
-        }
-
-        let mut state_guard = state.lock().await;
-
-        let Some(_) = state_guard.get_transaction(&client_address) else {
-            return Ok(None);
-        };
-
-        match self.validate_command_arguments() {
-            Some(err) => return Err(err),
-            None => {
-                state_guard.add_to_transaction(client_address.to_string(), self.clone())?;
-            }
-        }
-
-        Ok(Some(RespValue::SimpleString("QUEUED".to_string()).encode()))
-    }
-
     pub async fn handle_command_for_master_server(
         &self,
-        server: Arc<RwLock<RedisServer>>,
         client_address: &str,
+        server: Arc<RwLock<RedisServer>>,
         store: Arc<Mutex<KeyValueStore>>,
         state: Arc<Mutex<State>>,
     ) -> Result<CommandResult, CommandError> {
-        match self
+        self.throw_error_if_in_subscribed_mode(client_address, Arc::clone(&server))
+            .await?;
+
+        if let Some(response) = self
             .queue_command_if_in_transaction(client_address, Arc::clone(&state))
             .await?
         {
-            Some(response) => {
-                return Ok(CommandResult::Response(response));
-            }
-            None => (),
+            return Ok(CommandResult::Response(response));
         }
 
         let command_result = self
-            .handle_command(Arc::clone(&server), client_address, store, state)
+            .handle_command(
+                client_address,
+                Arc::clone(&server),
+                Arc::clone(&store),
+                Arc::clone(&state),
+            )
             .await?;
 
         {
@@ -302,23 +373,25 @@ impl CommandHandler {
 
     pub async fn handle_command_for_replica_master_connection(
         &self,
-        server: Arc<RwLock<RedisServer>>,
         client_address: &str,
+        server: Arc<RwLock<RedisServer>>,
         store: Arc<Mutex<KeyValueStore>>,
         state: Arc<Mutex<State>>,
     ) -> Result<CommandResult, CommandError> {
-        match self
+        if let Some(response) = self
             .queue_command_if_in_transaction(client_address, Arc::clone(&state))
             .await?
         {
-            Some(response) => {
-                return Ok(CommandResult::Response(response));
-            }
-            None => (),
+            return Ok(CommandResult::Response(response));
         }
 
         let command_result = self
-            .handle_command(Arc::clone(&server), client_address, store, state)
+            .handle_command(
+                client_address,
+                Arc::clone(&server),
+                Arc::clone(&store),
+                Arc::clone(&state),
+            )
             .await?;
 
         // Hack so that codecrafters test runs successfully
@@ -345,11 +418,14 @@ impl CommandHandler {
 
     pub async fn handle_command_for_replica_server(
         &self,
-        server: Arc<RwLock<RedisServer>>,
         client_address: &str,
+        server: Arc<RwLock<RedisServer>>,
         store: Arc<Mutex<KeyValueStore>>,
         state: Arc<Mutex<State>>,
     ) -> Result<CommandResult, CommandError> {
+        self.throw_error_if_in_subscribed_mode(client_address, Arc::clone(&server))
+            .await?;
+
         match self.name.as_str() {
             "PING" => ping(self.arguments.clone()),
             "ECHO" => echo(self.arguments.clone()),

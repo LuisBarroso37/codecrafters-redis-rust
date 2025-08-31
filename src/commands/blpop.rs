@@ -60,7 +60,7 @@ pub async fn blpop(
     remove_subscriber(state, &blpop_arguments.key, &client_address).await;
 
     if data.is_none() {
-        return Ok(CommandResult::Response(RespValue::NullBulkString.encode()));
+        return Ok(CommandResult::Response(RespValue::NullArray.encode()));
     }
 
     if let Some(value) = remove_first_element_from_list(store, &blpop_arguments.key).await {
@@ -68,7 +68,7 @@ pub async fn blpop(
             RespValue::encode_array_from_strings(vec![blpop_arguments.key, value]),
         ))
     } else {
-        Ok(CommandResult::Response(RespValue::NullBulkString.encode()))
+        Ok(CommandResult::Response(RespValue::NullArray.encode()))
     }
 }
 
