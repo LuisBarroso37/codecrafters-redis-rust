@@ -394,7 +394,7 @@ mod tests {
                 "$11\r\nhello world\r\n",
             ),
             (RespValue::NullBulkString, "$-1\r\n"),
-            (RespValue::NullArray, "*0\r\n"),
+            (RespValue::NullArray, "*-1\r\n"),
             (
                 RespValue::Array(vec![
                     RespValue::BulkString("hello".to_string()),

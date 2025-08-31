@@ -19,7 +19,7 @@ use crate::{
         lpop::{LpopArguments, lpop},
         lrange::{LrangeArguments, lrange},
         ping::{PingArguments, ping},
-        pub_sub::{SubscribeArguments, subscribe},
+        pub_sub::{subscribe, subscribe_ping},
         replication::{PsyncArguments, ReplconfArguments, WaitArguments, psync, replconf, wait},
         rpush_and_lpush::{PushArrayOperations, lpush, rpush},
         set::{SetArguments, set},
@@ -121,7 +121,6 @@ impl CommandHandler {
             "WAIT" => WaitArguments::parse(self.arguments.clone()).err(),
             "CONFIG GET" => ConfigGetArguments::parse(self.arguments.clone()).err(),
             "KEYS" => KeysArguments::parse(self.arguments.clone()).err(),
-            "SUBSCRIBE" => SubscribeArguments::parse(self.arguments.clone()).err(),
             _ => Some(CommandError::InvalidCommand),
         }
     }
@@ -159,11 +158,21 @@ impl CommandHandler {
         writer: Arc<RwLock<OwnedWriteHalf>>,
         server: Arc<RwLock<RedisServer>>,
     ) -> Result<Option<CommandResult>, CommandError> {
+        let is_in_subscribed_mode = is_in_subscribe_mode(client_address, Arc::clone(&server)).await;
+
         match self.name.as_str() {
             "SUBSCRIBE" => {
                 let command_result =
                     subscribe(client_address, writer, server, self.arguments.clone()).await?;
                 Ok(Some(command_result))
+            }
+            "PING" => {
+                if is_in_subscribed_mode {
+                    let command_result = subscribe_ping(self.arguments.clone())?;
+                    Ok(Some(command_result))
+                } else {
+                    Ok(None)
+                }
             }
             _ => Ok(None),
         }
@@ -185,20 +194,9 @@ impl CommandHandler {
             "RESET",
             "QUIT",
         ]);
-        let is_subscribed_mode = {
-            let server_guard = server.read().await;
-            let mut is_subscribed = false;
+        let is_in_subscribed_mode = is_in_subscribe_mode(client_address, server).await;
 
-            for channel in server_guard.pub_sub_channels.values() {
-                if channel.contains_key(client_address) {
-                    is_subscribed = true;
-                }
-            }
-
-            is_subscribed
-        };
-
-        match is_subscribed_mode {
+        match is_in_subscribed_mode {
             true => {
                 if pub_sub_commands.contains(&self.name.as_str()) {
                     Ok(())
@@ -439,4 +437,17 @@ impl CommandHandler {
             _ => Err(CommandError::ReplicaReadOnlyCommands),
         }
     }
+}
+
+async fn is_in_subscribe_mode(client_address: &str, server: Arc<RwLock<RedisServer>>) -> bool {
+    let server_guard = server.read().await;
+    let mut is_subscribed = false;
+
+    for channel in server_guard.pub_sub_channels.values() {
+        if channel.contains_key(client_address) {
+            is_subscribed = true;
+        }
+    }
+
+    is_subscribed
 }

@@ -241,7 +241,7 @@ impl TestEnv {
         command: RespValue,
         client_address: &str,
         writer: Arc<RwLock<OwnedWriteHalf>>,
-        expected_response: &str,
+        expected_response: Option<String>,
     ) {
         let result = self
             .exec_pub_sub_command(command, client_address, writer)
@@ -252,7 +252,10 @@ impl TestEnv {
 
         match command_result {
             Some(CommandResult::Response(resp)) => {
-                assert_eq!(resp, expected_response.to_string());
+                assert_eq!(Some(resp), expected_response);
+            }
+            None => {
+                assert_eq!(None, expected_response);
             }
             _ => panic!("Expected response, got something else"),
         }
@@ -668,9 +671,14 @@ impl TestUtils {
         format!("+{}\r\n", value)
     }
 
-    /// Create expected null response
-    pub fn expected_null() -> String {
+    /// Create expected null bulk string response
+    pub fn expected_null_bulk_string() -> String {
         "$-1\r\n".to_string()
+    }
+
+    /// Create expected null array response
+    pub fn expected_null_array() -> String {
+        "*-1\r\n".to_string()
     }
 
     /// Create expected bulk string array response

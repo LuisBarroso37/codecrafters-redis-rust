@@ -73,7 +73,7 @@ async fn test_handle_lpop_command_not_found() {
     env.exec_command_immediate_success_response(
         TestUtils::lpop_command("grape"),
         &TestUtils::client_address(41844),
-        &TestUtils::expected_null(),
+        &TestUtils::expected_null_bulk_string(),
     )
     .await;
 }
@@ -92,7 +92,7 @@ async fn test_handle_lpop_command_wrong_data_type() {
     env.exec_command_immediate_success_response(
         TestUtils::lpop_command("grape"),
         &TestUtils::client_address(41844),
-        &TestUtils::expected_null(),
+        &TestUtils::expected_null_bulk_string(),
     )
     .await;
 }

@@ -1,3 +1,5 @@
+mod ping;
 mod subscribe;
 
-pub use subscribe::{SubscribeArguments, subscribe};
+pub use ping::subscribe_ping;
+pub use subscribe::subscribe;

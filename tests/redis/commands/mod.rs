@@ -15,6 +15,7 @@ mod replconf;
 mod rpush;
 mod set;
 mod subscribe;
+mod subscribe_ping;
 mod transaction;
 mod type_command;
 mod xadd;

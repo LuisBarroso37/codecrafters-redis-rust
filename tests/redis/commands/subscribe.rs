@@ -17,7 +17,7 @@ async fn test_handle_subscribe_command() {
         TestUtils::subscribe_command("channel1"),
         &client_address,
         writer,
-        "*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n",
+        Some("*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n".to_string()),
     )
     .await;
 
@@ -35,7 +35,7 @@ async fn test_handle_consecutive_subscribe_commands_for_same_channel() {
         TestUtils::subscribe_command("channel1"),
         &client_address,
         Arc::clone(&writer),
-        "*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n",
+        Some("*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n".to_string()),
     )
     .await;
 
@@ -43,7 +43,7 @@ async fn test_handle_consecutive_subscribe_commands_for_same_channel() {
         TestUtils::subscribe_command("channel1"),
         &client_address,
         writer,
-        "*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n",
+        Some("*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n".to_string()),
     )
     .await;
 
@@ -61,7 +61,7 @@ async fn test_handle_consecutive_subscribe_commands_for_different_channel() {
         TestUtils::subscribe_command("channel1"),
         &client_address,
         Arc::clone(&writer),
-        "*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n",
+        Some("*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel1\r\n:1\r\n".to_string()),
     )
     .await;
 
@@ -69,7 +69,7 @@ async fn test_handle_consecutive_subscribe_commands_for_different_channel() {
         TestUtils::subscribe_command("channel2"),
         &client_address,
         writer,
-        "*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel2\r\n:2\r\n",
+        Some("*3\r\n$9\r\nsubscribe\r\n$8\r\nchannel2\r\n:2\r\n".to_string()),
     )
     .await;
 

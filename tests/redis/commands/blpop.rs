@@ -115,7 +115,7 @@ async fn test_blpop_timeout_behavior() {
     env.exec_command_immediate_success_response(
         TestUtils::blpop_command("empty_list", "1"),
         &TestUtils::client_address(12350),
-        &TestUtils::expected_null(),
+        &TestUtils::expected_null_array(),
     )
     .await;
 

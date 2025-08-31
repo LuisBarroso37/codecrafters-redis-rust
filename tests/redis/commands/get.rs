@@ -83,7 +83,7 @@ async fn test_handle_get_command_with_expiration() {
     env.exec_command_immediate_success_response(
         TestUtils::get_command("grape"),
         &TestUtils::client_address(41844),
-        &TestUtils::expected_null(),
+        &TestUtils::expected_null_bulk_string(),
     )
     .await;
 
@@ -124,7 +124,7 @@ async fn test_handle_get_command_not_found() {
     env.exec_command_immediate_success_response(
         TestUtils::get_command("grape"),
         &TestUtils::client_address(41844),
-        &TestUtils::expected_null(),
+        &TestUtils::expected_null_bulk_string(),
     )
     .await;
 

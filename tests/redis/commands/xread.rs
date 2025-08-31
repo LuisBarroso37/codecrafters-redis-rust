@@ -295,7 +295,7 @@ async fn test_xread_blocking_timeout_behavior() {
     env.exec_command_immediate_success_response(
         TestUtils::xread_blocking_command("1000", &["empty_stream"], &["1526919030404-1"]),
         &TestUtils::client_address(12350),
-        &TestUtils::expected_null(),
+        &TestUtils::expected_null_array(),
     )
     .await;
 
@@ -773,7 +773,7 @@ async fn test_xread_multiple_streams_concurrent_clients_partial_match() {
     // Client2 should timeout (return null)
     assert!(client2_result.is_ok());
     let response2 = client2_result.unwrap();
-    assert_eq!(response2, TestUtils::expected_null());
+    assert_eq!(response2, TestUtils::expected_null_array());
 }
 
 #[tokio::test]
