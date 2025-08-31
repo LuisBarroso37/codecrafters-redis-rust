@@ -39,10 +39,16 @@ pub async fn publish(
         .pub_sub_channels
         .get(&publish_arguments.channel)
     {
+        let message = RespValue::Array(vec![
+            RespValue::BulkString("message".to_string()),
+            RespValue::BulkString(publish_arguments.channel),
+            RespValue::BulkString(publish_arguments.message.clone()),
+        ]);
+
         for subscriber in channel.values() {
             let mut subscriber_guard = subscriber.write().await;
             subscriber_guard
-                .write_all(publish_arguments.message.as_bytes())
+                .write_all(message.encode().as_bytes())
                 .await
                 .map_err(|_| CommandError::IoError)?;
             subscriber_guard
